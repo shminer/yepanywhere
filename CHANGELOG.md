@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-02-25
+
+### Added
+- Session cloning support for Codex sessions
+- Show session creation date in Session Info panel
+
+### Fixed
+- Fix Codex sessions failing with 'minimal' reasoning effort
+- Fix broken image paths in README
+
 ## [0.4.4] - 2026-02-25
 
 ### Added
