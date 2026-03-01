@@ -224,7 +224,7 @@ export class CodexSessionScanner {
     try {
       const [stats, firstLine] = await Promise.all([
         stat(filePath),
-        readFirstLine(filePath),
+        readFirstLine(filePath, 65536),
       ]);
 
       if (!firstLine) {
