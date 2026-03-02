@@ -47,6 +47,8 @@ type AndroidDevice struct {
 	width  int32
 	height int32
 
+	captureMaxWidth int
+
 	writeMu   sync.Mutex
 	closeOnce sync.Once
 	closeErr  error
@@ -311,9 +313,12 @@ func readHandshakeDimensions(reader io.Reader) (int32, int32, error) {
 // GetFrame requests a frame and decodes the returned JPEG into RGB888.
 func (d *AndroidDevice) GetFrame(ctx context.Context, maxWidth int) (*Frame, error) {
 	_ = ctx
-	_ = maxWidth
 
 	d.writeMu.Lock()
+	if err := d.applyCaptureSettingsLocked(maxWidth); err != nil {
+		d.writeMu.Unlock()
+		return nil, err
+	}
 	err := conn.WriteFrameRequest(d.writer)
 	d.writeMu.Unlock()
 	if err != nil {
@@ -340,6 +345,45 @@ func (d *AndroidDevice) GetFrame(ctx context.Context, maxWidth int) (*Frame, err
 		Width:  int32(width),
 		Height: int32(height),
 	}, nil
+}
+
+func normalizeCaptureMaxWidth(maxWidth int) int {
+	if maxWidth <= 0 {
+		return 0
+	}
+	const minCaptureWidth = 64
+	const maxCaptureWidth = 4096
+	if maxWidth < minCaptureWidth {
+		return minCaptureWidth
+	}
+	if maxWidth > maxCaptureWidth {
+		return maxCaptureWidth
+	}
+	return maxWidth
+}
+
+func (d *AndroidDevice) applyCaptureSettingsLocked(maxWidth int) error {
+	requested := normalizeCaptureMaxWidth(maxWidth)
+	if requested == d.captureMaxWidth {
+		return nil
+	}
+
+	payload, err := json.Marshal(struct {
+		Cmd      string `json:"cmd"`
+		MaxWidth int    `json:"maxWidth"`
+	}{
+		Cmd:      "capture_settings",
+		MaxWidth: requested,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal capture settings payload: %w", err)
+	}
+
+	if err := conn.WriteControl(d.writer, payload); err != nil {
+		return fmt.Errorf("write capture settings: %w", err)
+	}
+	d.captureMaxWidth = requested
+	return nil
 }
 
 // SendTouch forwards touch control to the Android device server.

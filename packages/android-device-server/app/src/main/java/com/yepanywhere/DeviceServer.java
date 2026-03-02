@@ -14,6 +14,11 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Proxy;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -27,6 +32,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * DeviceServer runs under app_process (shell user) and serves framed screenshot/control traffic.
@@ -36,6 +45,7 @@ import java.util.Set;
  * - Frame request (sidecar -> device): [0x01]
  * - Frame response (device -> sidecar): [0x02][len u32 LE][jpeg bytes]
  * - Control (sidecar -> device): [0x03][len u32 LE][json bytes]
+ *   - {"cmd":"capture_settings","maxWidth":360} to request on-device downscaling
  */
 public final class DeviceServer {
     private static final int PORT = 27183;
@@ -47,6 +57,9 @@ public final class DeviceServer {
     private static final int TAP_SLOP_PX = 24;
     private static final int MIN_SWIPE_DURATION_MS = 80;
     private static final int MAX_SWIPE_DURATION_MS = 1200;
+    private static final int MAX_CAPTURE_WIDTH = 4096;
+    private static volatile FrameCapturer frameCapturer = createFrameCapturer();
+    private static volatile int captureMaxWidth = 0; // 0 => native width
 
     private DeviceServer() {}
 
@@ -77,7 +90,7 @@ public final class DeviceServer {
              BufferedOutputStream out = new BufferedOutputStream(client.getOutputStream())) {
 
             Frame frame = captureFrame();
-            writeHandshake(out, frame.width, frame.height);
+            writeHandshake(out, frame.screenWidth, frame.screenHeight);
 
             while (true) {
                 int msgType = in.read();
@@ -98,7 +111,7 @@ public final class DeviceServer {
                     }
                     byte[] payload = new byte[len];
                     in.readFully(payload);
-                    handleControl(payload, frame.width, frame.height, touchTracker);
+                    handleControl(payload, frame.screenWidth, frame.screenHeight, touchTracker);
                     continue;
                 }
 
@@ -141,6 +154,9 @@ public final class DeviceServer {
                     break;
                 case "key":
                     handleKey(obj);
+                    break;
+                case "capture_settings":
+                    handleCaptureSettings(obj);
                     break;
                 default:
                     log("unknown control cmd: " + cmd);
@@ -232,6 +248,15 @@ public final class DeviceServer {
         }
     }
 
+    private static void handleCaptureSettings(JSONObject obj) {
+        int requested = obj.optInt("maxWidth", 0);
+        if (requested <= 0) {
+            captureMaxWidth = 0;
+            return;
+        }
+        captureMaxWidth = Math.max(64, Math.min(MAX_CAPTURE_WIDTH, requested));
+    }
+
     private static String mapKeyCode(String key) {
         String normalized = key.trim().toLowerCase(Locale.US);
         switch (normalized) {
@@ -282,23 +307,647 @@ public final class DeviceServer {
     }
 
     private static Frame captureFrame() throws IOException {
-        byte[] png = runCommand(new String[]{"screencap", "-p"});
+        Bitmap captured = null;
+        Bitmap toEncode = null;
 
-        Bitmap bitmap = BitmapFactory.decodeByteArray(png, 0, png.length);
-        if (bitmap == null) {
-            throw new IOException("failed to decode screencap PNG");
+        FrameCapturer current = frameCapturer;
+        try {
+            captured = current.captureBitmap();
+        } catch (Throwable firstErr) {
+            if (!(current instanceof ScreencapFrameCapturer)) {
+                logError("capture backend failed, falling back to screencap", firstErr);
+                FrameCapturer fallback = new ScreencapFrameCapturer();
+                frameCapturer = fallback;
+                current = fallback;
+                try {
+                    captured = current.captureBitmap();
+                } catch (Throwable fallbackErr) {
+                    throw new IOException("capture failed via fallback screencap backend", fallbackErr);
+                }
+            } else {
+                throw new IOException("capture failed via screencap backend", firstErr);
+            }
         }
 
-        int width = bitmap.getWidth();
-        int height = bitmap.getHeight();
-
-        ByteArrayOutputStream jpegOut = new ByteArrayOutputStream();
-        if (!bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, jpegOut)) {
-            throw new IOException("failed to encode JPEG");
+        if (captured == null) {
+            throw new IOException("capture backend returned null bitmap");
         }
-        bitmap.recycle();
 
-        return new Frame(jpegOut.toByteArray(), width, height);
+        int sourceWidth = captured.getWidth();
+        int sourceHeight = captured.getHeight();
+        try {
+            Bitmap software = ensureSoftwareBitmap(captured);
+            toEncode = downscaleForCaptureSetting(software);
+
+            ByteArrayOutputStream jpegOut = new ByteArrayOutputStream(256 * 1024);
+            if (!toEncode.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, jpegOut)) {
+                throw new IOException("failed to encode JPEG");
+            }
+
+            return new Frame(
+                jpegOut.toByteArray(),
+                toEncode.getWidth(),
+                toEncode.getHeight(),
+                sourceWidth,
+                sourceHeight
+            );
+        } finally {
+            if (toEncode != null && toEncode != captured) {
+                toEncode.recycle();
+            }
+            if (captured != null) {
+                captured.recycle();
+            }
+        }
+    }
+
+    private static Bitmap ensureSoftwareBitmap(Bitmap bitmap) throws IOException {
+        if (bitmap.getConfig() == Bitmap.Config.HARDWARE) {
+            Bitmap copy = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            if (copy == null) {
+                throw new IOException("failed to copy hardware bitmap");
+            }
+            return copy;
+        }
+        return bitmap;
+    }
+
+    private static Bitmap downscaleForCaptureSetting(Bitmap bitmap) {
+        int requestedMaxWidth = captureMaxWidth;
+        if (requestedMaxWidth <= 0) {
+            return bitmap;
+        }
+        int srcW = bitmap.getWidth();
+        int srcH = bitmap.getHeight();
+        if (srcW <= requestedMaxWidth) {
+            return bitmap;
+        }
+        int dstW = requestedMaxWidth;
+        int dstH = Math.max(1, Math.round((srcH * (float) dstW) / (float) srcW));
+        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, dstW, dstH, true);
+        if (scaled == null) {
+            return bitmap;
+        }
+        return scaled;
+    }
+
+    private static FrameCapturer createFrameCapturer() {
+        try {
+            FrameCapturer c = AsyncScreenCaptureCapturer.create();
+            log("using capture backend: " + c.name());
+            return c;
+        } catch (Throwable t) {
+            log("screen-capture backend unavailable: " + t.getClass().getSimpleName() + " " + t.getMessage());
+        }
+
+        try {
+            FrameCapturer c = ReflectiveDisplayCaptureCapturer.forBackend(
+                "surface-control-capture",
+                "android.view.SurfaceControl"
+            );
+            log("using capture backend: " + c.name());
+            return c;
+        } catch (Throwable t) {
+            log("surface-control-capture backend unavailable: " + t.getClass().getSimpleName() + " " + t.getMessage());
+        }
+
+        FrameCapturer c = new ScreencapFrameCapturer();
+        log("using capture backend: " + c.name());
+        return c;
+    }
+
+    private static Method findMethodRequired(Class<?> owner, String name, Class<?>... args) throws NoSuchMethodException {
+        try {
+            Method m = owner.getMethod(name, args);
+            m.setAccessible(true);
+            return m;
+        } catch (NoSuchMethodException e) {
+            Method m = owner.getDeclaredMethod(name, args);
+            m.setAccessible(true);
+            return m;
+        }
+    }
+
+    private static Method findMethodOptional(Class<?> owner, String name, Class<?>... args) {
+        try {
+            return findMethodRequired(owner, name, args);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        }
+    }
+
+    private static Constructor<?> findDisplayTokenConstructorRequired(Class<?> owner) throws NoSuchMethodException {
+        Constructor<?> best = null;
+        for (Constructor<?> c : owner.getDeclaredConstructors()) {
+            Class<?>[] params = c.getParameterTypes();
+            if (params.length < 1) {
+                continue;
+            }
+            if (params[0].isPrimitive()) {
+                continue;
+            }
+            if (best == null || params.length < best.getParameterTypes().length) {
+                best = c;
+                if (params.length == 1) {
+                    break;
+                }
+            }
+        }
+        if (best != null) {
+            best.setAccessible(true);
+            return best;
+        }
+        throw new NoSuchMethodException("no display-token constructor for " + owner.getName());
+    }
+
+    private static Method[] allMethods(Class<?> owner) {
+        Method[] declared = owner.getDeclaredMethods();
+        Method[] publicMethods = owner.getMethods();
+        Method[] all = new Method[declared.length + publicMethods.length];
+        System.arraycopy(declared, 0, all, 0, declared.length);
+        System.arraycopy(publicMethods, 0, all, declared.length, publicMethods.length);
+        return all;
+    }
+
+    private static Object defaultValue(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == byte.class) {
+            return (byte) 0;
+        }
+        if (type == short.class) {
+            return (short) 0;
+        }
+        if (type == int.class) {
+            return 0;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        if (type == char.class) {
+            return '\0';
+        }
+        return null;
+    }
+
+    private static Bitmap screenshotObjectToBitmap(Object screenshot) throws Exception {
+        if (screenshot == null) {
+            throw new IOException("capture returned null screenshot object");
+        }
+        if (screenshot instanceof Bitmap) {
+            return (Bitmap) screenshot;
+        }
+
+        Bitmap direct = tryExtractBitmapLikeObject(screenshot);
+        if (direct != null) {
+            return direct;
+        }
+
+        // Some Android versions return a wrapper (e.g. ScreenCaptureResult) which
+        // exposes the actual image object via a getter. Probe no-arg getters once.
+        for (Method m : allMethods(screenshot.getClass())) {
+            if (m.getParameterTypes().length != 0) {
+                continue;
+            }
+            if (!m.getName().startsWith("get")) {
+                continue;
+            }
+            if (m.getReturnType().isPrimitive()) {
+                continue;
+            }
+            if (m.getDeclaringClass() == Object.class) {
+                continue;
+            }
+            try {
+                m.setAccessible(true);
+                Object nested = m.invoke(screenshot);
+                Bitmap b = tryExtractBitmapLikeObject(nested);
+                if (b != null) {
+                    return b;
+                }
+            } catch (Throwable ignored) {
+                // Keep probing other getters.
+            }
+        }
+
+        throw new IOException("could not convert screenshot object to Bitmap: " + screenshot.getClass().getName());
+    }
+
+    private static Bitmap tryExtractBitmapLikeObject(Object source) throws Exception {
+        if (source == null) {
+            return null;
+        }
+        if (source instanceof Bitmap) {
+            return (Bitmap) source;
+        }
+
+        Method asBitmap = findMethodOptional(source.getClass(), "asBitmap");
+        if (asBitmap != null) {
+            Object out = asBitmap.invoke(source);
+            if (out instanceof Bitmap) {
+                return (Bitmap) out;
+            }
+        }
+
+        Method getHardwareBuffer = findMethodOptional(source.getClass(), "getHardwareBuffer");
+        Method getColorSpace = findMethodOptional(source.getClass(), "getColorSpace");
+        if (getHardwareBuffer != null) {
+            Object hardwareBuffer = getHardwareBuffer.invoke(source);
+            if (hardwareBuffer != null) {
+                Method wrap = findBitmapWrapHardwareBufferMethod();
+                if (wrap != null) {
+                    Object colorSpace = getColorSpace != null ? getColorSpace.invoke(source) : null;
+                    Object out = wrap.invoke(null, hardwareBuffer, colorSpace);
+                    if (out instanceof Bitmap) {
+                        return (Bitmap) out;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private interface FrameCapturer {
+        String name();
+        Bitmap captureBitmap() throws Exception;
+    }
+
+    private static final class ScreencapFrameCapturer implements FrameCapturer {
+        @Override
+        public String name() {
+            return "screencap";
+        }
+
+        @Override
+        public Bitmap captureBitmap() throws Exception {
+            byte[] png = runCommand(new String[]{"screencap", "-p"});
+            Bitmap bitmap = BitmapFactory.decodeByteArray(png, 0, png.length);
+            if (bitmap == null) {
+                throw new IOException("failed to decode screencap PNG");
+            }
+            return bitmap;
+        }
+    }
+
+    private static final class AsyncScreenCaptureCapturer implements FrameCapturer {
+        private static final long CAPTURE_TIMEOUT_MS = 1500;
+
+        private final Method captureMethod;
+        private final Constructor<?> paramsCtor;
+        private final Class<?> outcomeReceiverClass;
+        private final Executor directExecutor = Runnable::run;
+
+        private AsyncScreenCaptureCapturer(
+            Method captureMethod,
+            Constructor<?> paramsCtor,
+            Class<?> outcomeReceiverClass
+        ) {
+            this.captureMethod = captureMethod;
+            this.paramsCtor = paramsCtor;
+            this.outcomeReceiverClass = outcomeReceiverClass;
+        }
+
+        static AsyncScreenCaptureCapturer create() throws Exception {
+            Class<?> screenCaptureClass = Class.forName("android.window.ScreenCapture");
+
+            Method captureMethod = null;
+            for (Method m : allMethods(screenCaptureClass)) {
+                if (!m.getName().equals("capture")) {
+                    continue;
+                }
+                if (!Modifier.isStatic(m.getModifiers())) {
+                    continue;
+                }
+                Class<?>[] params = m.getParameterTypes();
+                if (params.length != 3) {
+                    continue;
+                }
+                if (!params[0].getName().contains("ScreenCaptureParams")) {
+                    continue;
+                }
+                if (!Executor.class.isAssignableFrom(params[1])) {
+                    continue;
+                }
+                m.setAccessible(true);
+                captureMethod = m;
+                break;
+            }
+            if (captureMethod == null) {
+                throw new NoSuchMethodException("no capture(ScreenCaptureParams, Executor, OutcomeReceiver) method");
+            }
+
+            Class<?> paramsClass = captureMethod.getParameterTypes()[0];
+            Class<?> outcomeReceiverClass = captureMethod.getParameterTypes()[2];
+            Constructor<?> paramsCtor = findScreenCaptureParamsConstructorRequired(paramsClass);
+            if (paramsCtor == null) {
+                throw new NoSuchMethodException("no suitable ScreenCaptureParams constructor");
+            }
+
+            return new AsyncScreenCaptureCapturer(
+                captureMethod,
+                paramsCtor,
+                outcomeReceiverClass
+            );
+        }
+
+        @Override
+        public String name() {
+            return "screen-capture-async";
+        }
+
+        @Override
+        public Bitmap captureBitmap() throws Exception {
+            Object captureParams = newScreenCaptureParams();
+
+            CountDownLatch done = new CountDownLatch(1);
+            AtomicReference<Object> result = new AtomicReference<>();
+            AtomicReference<Throwable> error = new AtomicReference<>();
+
+            InvocationHandler handler = (proxy, method, args) -> {
+                String n = method.getName();
+                if ("onResult".equals(n) && args != null && args.length >= 1) {
+                    result.set(args[0]);
+                    done.countDown();
+                    return null;
+                }
+                if ("onError".equals(n) && args != null && args.length >= 1) {
+                    Object arg = args[0];
+                    if (arg instanceof Throwable) {
+                        error.set((Throwable) arg);
+                    } else {
+                        error.set(new RuntimeException(String.valueOf(arg)));
+                    }
+                    done.countDown();
+                    return null;
+                }
+                return null;
+            };
+            Object receiver = Proxy.newProxyInstance(
+                outcomeReceiverClass.getClassLoader(),
+                new Class<?>[]{outcomeReceiverClass},
+                handler
+            );
+
+            captureMethod.invoke(null, captureParams, directExecutor, receiver);
+            if (!done.await(CAPTURE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                throw new IOException("screen capture timed out");
+            }
+
+            Throwable captureErr = error.get();
+            if (captureErr != null) {
+                throw new IOException("screen capture error", captureErr);
+            }
+            return screenshotObjectToBitmap(result.get());
+        }
+
+        private static Constructor<?> findScreenCaptureParamsConstructorRequired(Class<?> paramsClass) {
+            Constructor<?> best = null;
+            for (Constructor<?> ctor : paramsClass.getDeclaredConstructors()) {
+                Class<?>[] params = ctor.getParameterTypes();
+                if (params.length < 1) {
+                    continue;
+                }
+                if (params[0] != int.class) {
+                    continue;
+                }
+                boolean allSupported = true;
+                for (Class<?> p : params) {
+                    if (p.isPrimitive()) {
+                        continue;
+                    }
+                    if (p == String.class) {
+                        continue;
+                    }
+                    allSupported = false;
+                    break;
+                }
+                if (!allSupported) {
+                    continue;
+                }
+                if (best == null || params.length < best.getParameterTypes().length) {
+                    best = ctor;
+                }
+            }
+            if (best != null) {
+                best.setAccessible(true);
+            }
+            return best;
+        }
+
+        private Object newScreenCaptureParams() throws Exception {
+            Class<?>[] types = paramsCtor.getParameterTypes();
+            Object[] args = new Object[types.length];
+            for (int i = 0; i < types.length; i++) {
+                if (types[i] == int.class) {
+                    args[i] = 0;
+                } else if (types[i] == boolean.class) {
+                    args[i] = false;
+                } else {
+                    args[i] = defaultValue(types[i]);
+                }
+            }
+            // displayId defaults to primary display (0)
+            args[0] = 0;
+            return paramsCtor.newInstance(args);
+        }
+    }
+
+    private static final class ReflectiveDisplayCaptureCapturer implements FrameCapturer {
+        private final String backendName;
+        private final Method captureDisplayMethod;
+        private final Constructor<?> argsBuilderCtor;
+        private final Method argsBuilderBuildMethod;
+        private final Class<?> captureArgsClass;
+        private final Method getInternalDisplayTokenMethod;
+        private final Method getBuiltInDisplayMethod;
+        private volatile Object cachedDisplayToken;
+
+        private ReflectiveDisplayCaptureCapturer(
+            String backendName,
+            Method captureDisplayMethod,
+            Constructor<?> argsBuilderCtor,
+            Method argsBuilderBuildMethod,
+            Class<?> captureArgsClass,
+            Method getInternalDisplayTokenMethod,
+            Method getBuiltInDisplayMethod
+        ) {
+            this.backendName = backendName;
+            this.captureDisplayMethod = captureDisplayMethod;
+            this.argsBuilderCtor = argsBuilderCtor;
+            this.argsBuilderBuildMethod = argsBuilderBuildMethod;
+            this.captureArgsClass = captureArgsClass;
+            this.getInternalDisplayTokenMethod = getInternalDisplayTokenMethod;
+            this.getBuiltInDisplayMethod = getBuiltInDisplayMethod;
+        }
+
+        static ReflectiveDisplayCaptureCapturer forBackend(
+            String backendName,
+            String captureOwnerClassName
+        ) throws Exception {
+            Class<?> captureOwner = Class.forName(captureOwnerClassName);
+            Class<?> surfaceControlClass = Class.forName("android.view.SurfaceControl");
+
+            Method captureDisplay = null;
+            for (Method method : allMethods(captureOwner)) {
+                if (!method.getName().equals("captureDisplay")) {
+                    continue;
+                }
+                if (!Modifier.isStatic(method.getModifiers())) {
+                    continue;
+                }
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length < 1) {
+                    continue;
+                }
+                if (!params[0].getName().contains("DisplayCaptureArgs")) {
+                    continue;
+                }
+                method.setAccessible(true);
+                if (captureDisplay == null || params.length == 1) {
+                    captureDisplay = method;
+                    if (params.length == 1) {
+                        break;
+                    }
+                }
+            }
+            if (captureDisplay == null) {
+                throw new NoSuchMethodException("no captureDisplay(DisplayCaptureArgs, ...) method on " + captureOwnerClassName);
+            }
+
+            Class<?> captureArgsClass = captureDisplay.getParameterTypes()[0];
+            Class<?> builderClass = Class.forName(captureArgsClass.getName() + "$Builder");
+            Constructor<?> builderCtor = findDisplayTokenConstructorRequired(builderClass);
+            Method buildMethod = findMethodRequired(builderClass, "build");
+            Method getInternalToken = findMethodOptional(surfaceControlClass, "getInternalDisplayToken");
+            Method getBuiltInDisplay = findMethodOptional(surfaceControlClass, "getBuiltInDisplay", int.class);
+
+            if (getInternalToken == null && getBuiltInDisplay == null) {
+                throw new NoSuchMethodException("no display token method on android.view.SurfaceControl");
+            }
+
+            return new ReflectiveDisplayCaptureCapturer(
+                backendName,
+                captureDisplay,
+                builderCtor,
+                buildMethod,
+                captureArgsClass,
+                getInternalToken,
+                getBuiltInDisplay
+            );
+        }
+
+        @Override
+        public String name() {
+            return backendName;
+        }
+
+        @Override
+        public Bitmap captureBitmap() throws Exception {
+            Object token = getDisplayToken();
+            if (token == null) {
+                throw new IOException("display token unavailable");
+            }
+
+            Class<?>[] ctorParams = argsBuilderCtor.getParameterTypes();
+            Object[] ctorArgs = new Object[ctorParams.length];
+            ctorArgs[0] = token;
+            for (int i = 1; i < ctorParams.length; i++) {
+                ctorArgs[i] = defaultValue(ctorParams[i]);
+            }
+            Object builder = argsBuilderCtor.newInstance(ctorArgs);
+            Object captureArgs = argsBuilderBuildMethod.invoke(builder);
+            if (!captureArgsClass.isInstance(captureArgs)) {
+                throw new IOException("unexpected capture args type: " + captureArgs.getClass().getName());
+            }
+
+            Class<?>[] params = captureDisplayMethod.getParameterTypes();
+            Object[] invokeArgs = new Object[params.length];
+            invokeArgs[0] = captureArgs;
+            for (int i = 1; i < params.length; i++) {
+                invokeArgs[i] = defaultValue(params[i]);
+            }
+            Object screenshot = captureDisplayMethod.invoke(null, invokeArgs);
+            return screenshotToBitmap(screenshot);
+        }
+
+        private Object getDisplayToken() throws Exception {
+            Object token = cachedDisplayToken;
+            if (token != null) {
+                return token;
+            }
+            synchronized (this) {
+                token = cachedDisplayToken;
+                if (token != null) {
+                    return token;
+                }
+                if (getInternalDisplayTokenMethod != null) {
+                    token = getInternalDisplayTokenMethod.invoke(null);
+                }
+                if (token == null && getBuiltInDisplayMethod != null) {
+                    token = getBuiltInDisplayMethod.invoke(null, 0);
+                }
+                cachedDisplayToken = token;
+                return token;
+            }
+        }
+
+        private Bitmap screenshotToBitmap(Object screenshot) throws Exception {
+            if (screenshot == null) {
+                throw new IOException("captureDisplay returned null screenshot object");
+            }
+            if (screenshot instanceof Bitmap) {
+                return (Bitmap) screenshot;
+            }
+
+            Method asBitmap = findMethodOptional(screenshot.getClass(), "asBitmap");
+            if (asBitmap != null) {
+                Object out = asBitmap.invoke(screenshot);
+                if (out instanceof Bitmap) {
+                    return (Bitmap) out;
+                }
+            }
+
+            Method getHardwareBuffer = findMethodOptional(screenshot.getClass(), "getHardwareBuffer");
+            Method getColorSpace = findMethodOptional(screenshot.getClass(), "getColorSpace");
+            if (getHardwareBuffer != null) {
+                Object hardwareBuffer = getHardwareBuffer.invoke(screenshot);
+                if (hardwareBuffer != null) {
+                    Method wrap = findBitmapWrapHardwareBufferMethod();
+                    if (wrap != null) {
+                        Object colorSpace = getColorSpace != null ? getColorSpace.invoke(screenshot) : null;
+                        Object out = wrap.invoke(null, hardwareBuffer, colorSpace);
+                        if (out instanceof Bitmap) {
+                            return (Bitmap) out;
+                        }
+                    }
+                }
+            }
+
+            throw new IOException("could not convert screenshot object to Bitmap: " + screenshot.getClass().getName());
+        }
+    }
+
+    private static Method findBitmapWrapHardwareBufferMethod() {
+        for (Method m : Bitmap.class.getMethods()) {
+            if (!m.getName().equals("wrapHardwareBuffer")) {
+                continue;
+            }
+            Class<?>[] params = m.getParameterTypes();
+            if (params.length == 2) {
+                return m;
+            }
+        }
+        return null;
     }
 
     private static byte[] runCommand(String[] cmd) throws IOException {
@@ -380,11 +1029,15 @@ public final class DeviceServer {
         final byte[] jpeg;
         final int width;
         final int height;
+        final int screenWidth;
+        final int screenHeight;
 
-        Frame(byte[] jpeg, int width, int height) {
+        Frame(byte[] jpeg, int width, int height, int screenWidth, int screenHeight) {
             this.jpeg = jpeg;
             this.width = width;
             this.height = height;
+            this.screenWidth = screenWidth;
+            this.screenHeight = screenHeight;
         }
     }
 

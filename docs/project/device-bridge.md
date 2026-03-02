@@ -135,9 +135,10 @@ Control command (sidecar → device, fire-and-forget, no response):
   [0x03][4-byte LE JSON length][JSON bytes]
   e.g. {"cmd":"touch","touches":[{"x":0.5,"y":0.3,"pressure":1.0}]}
        {"cmd":"key","key":"back"}
+       {"cmd":"capture_settings","maxWidth":360}
 ```
 
-Touch and key commands are fire-and-forget — no ack needed. The device runs a reader goroutine (handles 0x01 frame requests and 0x03 commands) and a writer goroutine (sends 0x02 frames). The sidecar's video and input goroutines share the single connection with a write mutex.
+Touch, key, and capture-settings commands are fire-and-forget — no ack needed. `capture_settings.maxWidth` allows on-device downscaling before JPEG encode to reduce capture/encode cost on physical devices. The device runs a reader goroutine (handles 0x01 frame requests and 0x03 commands) and a writer goroutine (sends 0x02 frames). The sidecar's video and input goroutines share the single connection with a write mutex.
 
 JPEG because `Bitmap.compress(JPEG, 70, stream)` is built-in on Android and the sidecar decodes to YUV for x264 anyway — much smaller than raw RGB888 over the ADB tunnel.
 
@@ -282,6 +283,26 @@ All code lives in this repo.
 - ✅ Server download endpoint now pulls both artifacts (`POST /api/devices/bridge/download`)
 - ✅ `DeviceBridgeService.startStream()` auto-ensures APK availability for Android/APK transport sessions
 
+**Android APK streaming performance findings (2026-03-02, Pixel 7a / Android 16):**
+
+- Direct APK protocol benchmark (`0x01` frame request loop over `adb forward` to `:27183`):
+  - 60 measured frames (after warmup): **2.36 fps**
+  - Frame request round-trip latency: **~424 ms avg** (p50 ~413 ms, p95 ~493 ms)
+  - JPEG payload size: **~164 KB avg** at current `JPEG_QUALITY=70`
+- Raw capture micro-benchmark on device:
+  - `adb shell 'screencap -p >/dev/null'` repeated: **~341 ms avg** (~2.93 fps ceiling)
+  - `adb exec-out screencap -p` repeated: **~369 ms avg** (~2.71 fps ceiling)
+- Host-side bridge processing on one captured frame (`1080x2400 -> 360x800`) is not the primary limit:
+  - JPEG decode + RGB expand + scale/I420 + x264 encode: **~41 ms avg** in local bench (~24 fps headroom)
+
+**Current bottleneck summary:**
+
+1. **Primary**: APK capture path in `DeviceServer.java` runs `screencap -p` as a new subprocess per frame, then does PNG decode and JPEG re-encode (`captureFrame()` + `runCommand()`), which caps throughput to low single-digit fps on real hardware.
+2. **Secondary**: `AndroidDevice.GetFrame()` currently ignores `maxWidth` and always processes full-resolution frames (`1080x2400` in this test), increasing capture and conversion work.
+3. **Tertiary**: Go `decodeJPEGToRGB()` uses per-pixel `img.At()` conversion, which is functional but not optimal for high resolutions.
+
+**Implication:** the reported ~1 fps in full WebRTC sessions is consistent with a source stage that is already near ~2-3 fps before network/peer overhead.
+
 **New tests for Phase 3:**
 
 - **Go: `AndroidDevice` with mock TCP server** — spin up a `net.Listen` TCP server in the test, run `AndroidDevice` against it. Send handshake + a frame response; assert `GetFrame()` returns the correct bytes.
@@ -377,6 +398,16 @@ The test server must run over plain HTTP. If `HTTPS_SELF_SIGNED=true` is set in 
 See **[device-bridge-android-a11y.md](device-bridge-android-a11y.md)** for the full design.
 
 Extends `DeviceServer.java` with `UiAutomation` accessibility tree support so AI agents can understand and interact with Android screens without screenshots. A standalone CLI (`bin/android-agent`) talks directly to the APK over ADB forwarding — independent of the streaming bridge. Modeled after the [chromeos-testbed](~/code/chromeos-testbed) pattern: `snapshot` → `find` → `tap`/`type` → `snapshot` workflow, with compact LLM-friendly output and a skill definition for agent integration.
+
+---
+
+## Real-Device Hardware Encoding (MediaCodec)
+
+See **[device-bridge-mediacodec.md](device-bridge-mediacodec.md)** for the full design.
+
+The current real-device capture path polls screenshot APIs per frame (~400ms/frame on a Pixel 7a, ~2.5 fps). This replaces it with a continuous `SurfaceControl.createDisplay()` → `VirtualDisplay` → `MediaCodec` hardware H.264 pipeline. The hardware encoder outputs NAL units directly, which the Go sidecar forwards to WebRTC without re-encoding — eliminating JPEG encode/decode, RGB→I420 conversion, and x264 software encoding from the hot path. Expected: 30-60 fps, <50ms latency.
+
+The emulator path (gRPC screenshots → x264) is unchanged.
 
 ---
 

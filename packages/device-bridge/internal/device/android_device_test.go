@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -112,6 +113,105 @@ func TestAndroidDeviceWithMockTCPServer(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil && err != io.EOF {
+			t.Fatalf("mock server goroutine: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for mock server goroutine")
+	}
+}
+
+func TestAndroidDeviceAppliesCaptureSettingsOnMaxWidthChange(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		defer close(done)
+
+		var handshake [4]byte
+		binary.LittleEndian.PutUint16(handshake[:2], 1080)
+		binary.LittleEndian.PutUint16(handshake[2:], 2400)
+		if _, err := serverConn.Write(handshake[:]); err != nil {
+			done <- err
+			return
+		}
+
+		expectCaptureSettings := func(width int) error {
+			msgType, payload, err := conn.ReadMessage(serverConn)
+			if err != nil {
+				return err
+			}
+			if msgType != conn.TypeControl {
+				return errUnexpectedMessageType(msgType)
+			}
+			raw := string(payload)
+			if !strings.Contains(raw, `"cmd":"capture_settings"`) {
+				return errString("missing capture_settings control payload")
+			}
+			if !strings.Contains(raw, `"maxWidth":`+fmt.Sprintf("%d", width)) {
+				return errString("unexpected capture maxWidth payload: " + raw)
+			}
+			return nil
+		}
+
+		expectFrameRequestThenRespond := func() error {
+			msgType, _, err := conn.ReadMessage(serverConn)
+			if err != nil {
+				return err
+			}
+			if msgType != conn.TypeFrameRequest {
+				return errUnexpectedMessageType(msgType)
+			}
+			return conn.WriteFrameResponse(serverConn, testJPEG(2, 1))
+		}
+
+		if err := expectCaptureSettings(360); err != nil {
+			done <- err
+			return
+		}
+		if err := expectFrameRequestThenRespond(); err != nil {
+			done <- err
+			return
+		}
+
+		// Same maxWidth should not resend capture_settings.
+		if err := expectFrameRequestThenRespond(); err != nil {
+			done <- err
+			return
+		}
+
+		if err := expectCaptureSettings(540); err != nil {
+			done <- err
+			return
+		}
+		if err := expectFrameRequestThenRespond(); err != nil {
+			done <- err
+			return
+		}
+
+		done <- nil
+	}()
+
+	d, err := NewAndroidDeviceWithTransport("R3CN90ABCDE", clientConn, nil)
+	if err != nil {
+		t.Fatalf("new device: %v", err)
+	}
+	defer d.Close()
+
+	if _, err := d.GetFrame(context.Background(), 360); err != nil {
+		t.Fatalf("GetFrame(360): %v", err)
+	}
+	if _, err := d.GetFrame(context.Background(), 360); err != nil {
+		t.Fatalf("GetFrame(360) second: %v", err)
+	}
+	if _, err := d.GetFrame(context.Background(), 540); err != nil {
+		t.Fatalf("GetFrame(540): %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
 			t.Fatalf("mock server goroutine: %v", err)
 		}
 	case <-time.After(2 * time.Second):

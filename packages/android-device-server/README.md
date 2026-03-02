@@ -56,3 +56,4 @@ Control JSON examples:
 
 - `{"cmd":"touch","touches":[{"x":0.5,"y":0.3,"pressure":1.0}]}`
 - `{"cmd":"key","key":"back"}`
+- `{"cmd":"capture_settings","maxWidth":360}` (0 or missing = native width)
