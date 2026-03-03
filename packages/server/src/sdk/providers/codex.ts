@@ -294,6 +294,7 @@ class CodexAppServerClient {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: this.env,
+      shell: process.platform === "win32",
     });
 
     this.process = child;
@@ -647,6 +648,7 @@ export class CodexProvider implements AgentProvider {
         {
           stdio: ["pipe", "pipe", "pipe"],
           env: this.getCodexEnv(),
+          shell: process.platform === "win32",
         },
       );
 

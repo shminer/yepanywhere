@@ -868,6 +868,7 @@ export class GeminiACPProvider implements AgentProvider {
       // If it fails or doesn't recognize the flag, ACP isn't supported
       const proc = spawn(geminiPath, ["--help"], {
         stdio: ["pipe", "pipe", "pipe"],
+        shell: process.platform === "win32",
       });
 
       let output = "";

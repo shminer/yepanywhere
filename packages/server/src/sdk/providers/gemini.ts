@@ -277,6 +277,7 @@ export class GeminiProvider implements AgentProvider {
           env: {
             ...process.env,
           },
+          shell: process.platform === "win32",
         });
         pidRef.value = geminiProcess.pid;
       } catch (error) {

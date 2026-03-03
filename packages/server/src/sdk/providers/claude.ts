@@ -341,6 +341,7 @@ export class ClaudeProvider implements AgentProvider {
           cwd: spawnOpts.cwd,
           env: spawnOpts.env as NodeJS.ProcessEnv,
           stdio: ["pipe", "pipe", "pipe"],
+          shell: process.platform === "win32",
         });
 
         // Wire up abort signal → SIGTERM, matching remote-spawn behavior

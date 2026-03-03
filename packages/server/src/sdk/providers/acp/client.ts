@@ -107,6 +107,7 @@ export class ACPClient {
       cwd: config.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...config.env },
+      shell: process.platform === "win32",
     });
 
     this.process.stderr?.on("data", (data: Buffer) => {

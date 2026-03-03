@@ -221,6 +221,7 @@ export class OpenCodeProvider implements AgentProvider {
           env: {
             ...process.env,
           },
+          shell: process.platform === "win32",
         },
       );
       pidRef.value = serverProcess.pid;

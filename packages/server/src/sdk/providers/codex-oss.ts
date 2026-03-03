@@ -397,6 +397,7 @@ export class CodexOSSProvider implements AgentProvider {
           cwd: options.cwd,
           stdio: ["pipe", "pipe", "pipe"],
           env: { ...process.env },
+          shell: process.platform === "win32",
         });
         pidRef.value = codexProcess.pid;
 
