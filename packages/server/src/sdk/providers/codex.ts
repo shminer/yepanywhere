@@ -1988,6 +1988,7 @@ export class CodexProvider implements AgentProvider {
           toolName: normalizedInvocation.toolName,
           input: normalizedInvocation.input,
           readShellInfo: normalizedInvocation.readShellInfo,
+          writeShellInfo: normalizedInvocation.writeShellInfo,
         };
 
         // Emit tool_use for the command

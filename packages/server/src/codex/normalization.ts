@@ -15,16 +15,23 @@ export interface CodexReadShellInfo {
   stripLineNumbers: boolean;
 }
 
+export interface CodexWriteShellInfo {
+  filePath: string;
+  content: string;
+}
+
 export interface CodexToolCallContext {
   toolName: string;
   input: unknown;
   readShellInfo?: CodexReadShellInfo;
+  writeShellInfo?: CodexWriteShellInfo;
 }
 
 export interface NormalizedCodexToolInvocation {
   toolName: string;
   input: unknown;
   readShellInfo?: CodexReadShellInfo;
+  writeShellInfo?: CodexWriteShellInfo;
 }
 
 export interface NormalizedCodexToolOutput {
@@ -101,6 +108,15 @@ export function normalizeCodexToolInvocation(
     };
   }
 
+  const writeShellInfo = parseHeredocWriteShellCommand(command);
+  if (writeShellInfo) {
+    return {
+      toolName: "Write",
+      input: createWriteToolInput(writeShellInfo),
+      writeShellInfo,
+    };
+  }
+
   return { toolName: "Bash", input: normalizedInput };
 }
 
@@ -133,6 +149,10 @@ export function normalizeCodexToolOutputWithContext(
       );
       structured = readResult;
       content = readContent;
+    }
+  } else if (context?.toolName === "Write" && context.writeShellInfo) {
+    if (!isError) {
+      structured = normalizeWriteOutput(context.writeShellInfo);
     }
   }
 
@@ -191,6 +211,13 @@ export function normalizeCodexCommandExecutionOutput(
   ) {
     structured = normalizeReadOutput(baseOutput, context.readShellInfo);
     content = baseOutput;
+  } else if (
+    context?.toolName === "Write" &&
+    context.writeShellInfo &&
+    !isError &&
+    execution.status !== "declined"
+  ) {
+    structured = normalizeWriteOutput(context.writeShellInfo);
   }
 
   return { content, structured, isError };
@@ -329,6 +356,63 @@ function parseReadShellCommand(command: string): CodexReadShellInfo | null {
   return null;
 }
 
+function parseHeredocWriteShellCommand(
+  command: string,
+): CodexWriteShellInfo | null {
+  const normalized = command.replace(/\r\n/g, "\n").trimEnd();
+  const lines = normalized.split("\n");
+  if (lines.length < 2) {
+    return null;
+  }
+
+  const header = lines[0]?.trim() ?? "";
+  const match =
+    /^cat\s+>\s*(?<path>'[^']+'|"[^"]+"|[^\s]+)\s+<<(?<stripTabs>-?)(?<quote>['"]?)(?<marker>[A-Za-z_][A-Za-z0-9_]*)\k<quote>\s*$/.exec(
+      header,
+    );
+  if (!match?.groups) {
+    return null;
+  }
+
+  const marker = match.groups.marker;
+  if (!marker) {
+    return null;
+  }
+
+  const stripTabs = match.groups.stripTabs === "-";
+  const filePath = stripOuterQuotes(match.groups.path ?? "");
+  if (!filePath || filePath.startsWith("-")) {
+    return null;
+  }
+
+  const terminatorLineIndex = lines.findIndex((line, index) => {
+    if (index === 0) {
+      return false;
+    }
+    const candidate = stripTabs ? line.replace(/^\t+/, "") : line;
+    return candidate.trim() === marker;
+  });
+  if (terminatorLineIndex < 1) {
+    return null;
+  }
+
+  const trailingLines = lines.slice(terminatorLineIndex + 1);
+  if (trailingLines.some((line) => line.trim().length > 0)) {
+    return null;
+  }
+
+  const bodyLines = lines.slice(1, terminatorLineIndex);
+  let content = bodyLines.join("\n");
+  if (bodyLines.length > 0) {
+    content += "\n";
+  }
+
+  return {
+    filePath,
+    content,
+  };
+}
+
 function createReadToolInput(
   readInfo: CodexReadShellInfo,
 ): Record<string, unknown> {
@@ -346,6 +430,15 @@ function createReadToolInput(
   }
 
   return input;
+}
+
+function createWriteToolInput(
+  writeInfo: CodexWriteShellInfo,
+): Record<string, unknown> {
+  return {
+    file_path: writeInfo.filePath,
+    content: writeInfo.content,
+  };
 }
 
 function parseRipgrepCommand(command: string): Record<string, unknown> | null {
@@ -694,6 +787,29 @@ function normalizeReadOutput(
   };
 }
 
+function normalizeWriteOutput(writeInfo: CodexWriteShellInfo): {
+  type: "text";
+  file: {
+    filePath: string;
+    content: string;
+    numLines: number;
+    startLine: number;
+    totalLines: number;
+  };
+} {
+  const numLines = countContentLines(writeInfo.content);
+  return {
+    type: "text",
+    file: {
+      filePath: writeInfo.filePath,
+      content: writeInfo.content,
+      numLines,
+      startLine: 1,
+      totalLines: numLines,
+    },
+  };
+}
+
 function countContentLines(content: string): number {
   if (!content) {
     return 0;
@@ -704,4 +820,18 @@ function countContentLines(content: string): number {
     lines.pop();
   }
   return lines.length;
+}
+
+function stripOuterQuotes(value: string): string {
+  if (value.length < 2) {
+    return value;
+  }
+
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === "'" && last === "'") || (first === '"' && last === '"')) {
+    return value.slice(1, -1);
+  }
+
+  return value;
 }

@@ -522,6 +522,7 @@ function convertCodexFunctionCallPayload(
       toolName: normalizedInvocation.toolName,
       input: normalizedInvocation.input,
       readShellInfo: normalizedInvocation.readShellInfo,
+      writeShellInfo: normalizedInvocation.writeShellInfo,
     },
   };
 }
@@ -570,6 +571,7 @@ function convertCodexCustomToolCallPayload(
       toolName: normalizedInvocation.toolName,
       input: normalizedInvocation.input,
       readShellInfo: normalizedInvocation.readShellInfo,
+      writeShellInfo: normalizedInvocation.writeShellInfo,
     },
   };
 }

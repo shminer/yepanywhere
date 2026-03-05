@@ -781,6 +781,7 @@ export class CodexOSSProvider implements AgentProvider {
           toolName: normalizedInvocation.toolName,
           input: normalizedInvocation.input,
           readShellInfo: normalizedInvocation.readShellInfo,
+          writeShellInfo: normalizedInvocation.writeShellInfo,
         };
         const messages: SDKMessage[] = [
           {

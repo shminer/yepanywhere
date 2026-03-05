@@ -257,6 +257,65 @@ describe("CodexProvider Event Normalization", () => {
     });
   });
 
+  it("normalizes heredoc command execution as Write with structured file result", () => {
+    const provider = createTestProvider() as unknown as {
+      convertItemToSDKMessages: (
+        item: unknown,
+        sessionId: string,
+        turnId: string,
+        isComplete: boolean,
+      ) => Array<Record<string, unknown>>;
+    };
+
+    const content = "line 1\nline 2\n";
+    const messages = provider.convertItemToSDKMessages(
+      {
+        id: "call-write",
+        type: "command_execution",
+        command: `cat > src/generated.ts <<'EOF'\n${content}EOF`,
+        aggregated_output: "",
+        exit_code: 0,
+        status: "completed",
+      },
+      "session-1",
+      "turn-2",
+      true,
+    );
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.message).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: "call-write",
+          name: "Write",
+          input: {
+            file_path: "src/generated.ts",
+            content,
+          },
+        },
+      ],
+    });
+
+    const resultBlock = ((
+      messages[1]?.message as { content?: unknown[] } | undefined
+    )?.content ?? [])[0] as Record<string, unknown>;
+    expect(resultBlock.type).toBe("tool_result");
+    expect(resultBlock.tool_use_id).toBe("call-write");
+    expect(resultBlock.is_error).toBeUndefined();
+    expect(messages[1]?.toolUseResult).toMatchObject({
+      type: "text",
+      file: {
+        filePath: "src/generated.ts",
+        content,
+        numLines: 2,
+        startLine: 1,
+        totalLines: 2,
+      },
+    });
+  });
+
   it("normalizes no-match ripgrep exit code as non-error Grep result", () => {
     const provider = createTestProvider() as unknown as {
       convertItemToSDKMessages: (

@@ -423,6 +423,72 @@ describe("Codex Normalization", () => {
     });
   });
 
+  it("maps heredoc cat writes to Write with structured file result", () => {
+    const content =
+      'import { publish } from "./sw-v2";\n\nexport default publish;\n';
+    const entries: CodexSessionEntry[] = [
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:01Z",
+        payload: {
+          type: "function_call",
+          name: "exec_command",
+          call_id: "call-write",
+          arguments: JSON.stringify({
+            cmd: `cat > website/sw-v2-adapter.ts <<'EOF'\n${content}EOF`,
+          }),
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: "2024-01-01T00:00:02Z",
+        payload: {
+          type: "function_call_output",
+          call_id: "call-write",
+          output:
+            "Chunk ID: write123\nWall time: 0.0400 seconds\nProcess exited with code 0\nOutput:\n\n",
+        },
+      },
+    ];
+
+    const result = normalizeSession(buildLoadedSession(entries));
+    expect(result.messages).toHaveLength(2);
+
+    const toolUseContent = result.messages[0]?.message?.content;
+    const useBlock = Array.isArray(toolUseContent)
+      ? toolUseContent[0]
+      : toolUseContent;
+    expect(useBlock).toMatchObject({
+      type: "tool_use",
+      id: "call-write",
+      name: "Write",
+      input: {
+        file_path: "website/sw-v2-adapter.ts",
+        content,
+      },
+    });
+
+    const toolResultContent = result.messages[1]?.message?.content;
+    const resultBlock = Array.isArray(toolResultContent)
+      ? toolResultContent[0]
+      : toolResultContent;
+    expect(resultBlock).toMatchObject({
+      type: "tool_result",
+      tool_use_id: "call-write",
+    });
+    expect((resultBlock as { is_error?: boolean }).is_error).toBeUndefined();
+    expect(result.messages[1]?.toolUseResult).toMatchObject({
+      type: "text",
+      file: {
+        filePath: "website/sw-v2-adapter.ts",
+        content,
+        numLines: 3,
+        startLine: 1,
+        totalLines: 3,
+      },
+    });
+  });
+
   it('does not mark shell output as error when exit code is 0 and output text contains "failed"', () => {
     const entries: CodexSessionEntry[] = [
       {
