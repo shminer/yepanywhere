@@ -309,9 +309,15 @@ export interface UpdateBindingResponse {
   redirectUrl?: string;
 }
 
+export interface GetVersionOptions {
+  /** Bypass the server's routine version cache and refresh from the update service. */
+  fresh?: boolean;
+}
+
 export const api = {
   // Version API
-  getVersion: () => fetchJSON<VersionInfo>("/version"),
+  getVersion: (options?: GetVersionOptions) =>
+    fetchJSON<VersionInfo>(options?.fresh ? "/version?fresh=1" : "/version"),
 
   // Server info API (host/port binding for Local Access settings)
   getServerInfo: () => fetchJSON<ServerInfo>("/server-info"),

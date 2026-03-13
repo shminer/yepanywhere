@@ -9,7 +9,12 @@ import { activityBus } from "../../lib/activityBus";
 
 export function AboutSettings() {
   const { canInstall, isInstalled, install } = usePwaInstall();
-  const { version: versionInfo } = useVersion();
+  const {
+    version: versionInfo,
+    loading: versionLoading,
+    error: versionError,
+    refetchFresh: refetchVersionFresh,
+  } = useVersion({ freshOnMount: true });
   const remoteConnection = useOptionalRemoteConnection();
   const { resetOnboarding } = useOnboarding();
   const { remoteLogCollectionEnabled, setRemoteLogCollectionEnabled } =
@@ -100,6 +105,11 @@ export function AboutSettings() {
               )}
             </p>
             <p>Client: v{__APP_VERSION__}</p>
+            {versionError && (
+              <p className="settings-warning">
+                Unable to refresh update status right now.
+              </p>
+            )}
             {showRelayResumeUpdateWarning && (
               <p className="settings-warning">
                 Relay session resume requires a server update. New login works,
@@ -112,6 +122,14 @@ export function AboutSettings() {
               </p>
             )}
           </div>
+          <button
+            type="button"
+            className="settings-button"
+            onClick={() => void refetchVersionFresh()}
+            disabled={versionLoading}
+          >
+            {versionLoading ? "Checking..." : "Check for Updates"}
+          </button>
         </div>
         <div className="settings-item">
           <div className="settings-item-info">

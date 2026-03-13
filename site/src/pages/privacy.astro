@@ -23,10 +23,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <h2>Network Requests</h2>
       <p>The application makes minimal network requests:</p>
       <ul>
-        <li><strong>npm registry</strong> — When you open Settings and check for updates, we fetch version information from <code>registry.npmjs.org</code>. This is the only request made to an external service, and it only happens when you explicitly check for updates.</li>
+        <li><strong>Yep Anywhere update service</strong> — The app periodically checks <code>updates.yepanywhere.com</code> for version information, and opening Settings → About or using the manual update check triggers a fresh check. These requests include the running app version and an installation identifier so we can maintain relay compatibility, monitor rollout reliability, and support backwards compatibility.</li>
         <li><strong>Your AI provider</strong> — When you run sessions, requests go directly to your configured AI provider (Anthropic, OpenAI, etc.) using your own API keys.</li>
       </ul>
-      <p>No data is sent to yepanywhere servers. We don't track usage, collect analytics, or phone home.</p>
+      <p>Aside from update/version checks to <code>updates.yepanywhere.com</code>, app data is not sent to yepanywhere servers. We do not send session contents, prompts, or files to that service.</p>
 
       <h2>Local Data Storage</h2>
       <p>All data is stored locally on your machine:</p>

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type VersionInfo, api } from "../api/client";
 
+interface UseVersionOptions {
+  /** Request a fresh update check on initial mount. */
+  freshOnMount?: boolean;
+}
+
 /**
  * Hook to fetch and cache server version info.
  *
@@ -10,17 +15,17 @@ import { type VersionInfo, api } from "../api/client";
  * - error: Any error that occurred during fetch
  * - refetch: Function to manually refresh version info
  */
-export function useVersion() {
+export function useVersion(options?: UseVersionOptions) {
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const hasFetchedRef = useRef(false);
 
-  const fetch = useCallback(async () => {
+  const fetchVersion = useCallback(async (fresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getVersion();
+      const data = await api.getVersion({ fresh });
       setVersion(data);
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -33,8 +38,14 @@ export function useVersion() {
   useEffect(() => {
     if (hasFetchedRef.current) return;
     hasFetchedRef.current = true;
-    fetch();
-  }, [fetch]);
+    void fetchVersion(options?.freshOnMount ?? false);
+  }, [fetchVersion, options?.freshOnMount]);
 
-  return { version, loading, error, refetch: fetch };
+  return {
+    version,
+    loading,
+    error,
+    refetch: () => fetchVersion(false),
+    refetchFresh: () => fetchVersion(true),
+  };
 }

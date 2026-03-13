@@ -133,7 +133,7 @@ describe("GET /version", () => {
     );
   });
 
-  it("caches result for 5 minutes", async () => {
+  it("caches result for 24 hours", async () => {
     const realDateNow = Date.now;
     let now = realDateNow();
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -154,13 +154,33 @@ describe("GET /version", () => {
     await routes.request("/");
     expect(fetchCount).toBe(1);
 
-    // Advance past 5 minute TTL
-    now += 5 * 60 * 1000 + 1;
+    // Advance past 24 hour TTL
+    now += 24 * 60 * 60 * 1000 + 1;
 
     await routes.request("/");
     expect(fetchCount).toBe(2);
 
     vi.spyOn(Date, "now").mockRestore();
+  });
+
+  it("bypasses cache when fresh=1 is requested", async () => {
+    let fetchCount = 0;
+    mockFetch(() => {
+      fetchCount++;
+      return new Response(JSON.stringify({ version: "1.0.0" }));
+    });
+
+    const { createVersionRoutes } = await importVersion();
+    const routes = createVersionRoutes();
+
+    await routes.request("/");
+    expect(fetchCount).toBe(1);
+
+    await routes.request("/");
+    expect(fetchCount).toBe(1);
+
+    await routes.request("/?fresh=1");
+    expect(fetchCount).toBe(2);
   });
 
   it("includes capabilities and resumeProtocolVersion", async () => {

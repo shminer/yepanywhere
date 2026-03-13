@@ -47,9 +47,9 @@ function getCurrentVersion(): string {
 
 const UPDATE_SERVER_URL = "https://updates.yepanywhere.com/version";
 
-// Cache for update server check (5 minute TTL)
+// Cache for update server check (24 hour TTL for routine app traffic)
 let cachedLatestVersion: { version: string; timestamp: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
  * Fetch the latest version from the update server.
@@ -58,9 +58,11 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 async function getLatestVersion(
   currentVersion: string,
   installId?: string,
+  options?: { forceRefresh?: boolean },
 ): Promise<string | null> {
   // Return cached value if fresh
   if (
+    !options?.forceRefresh &&
     cachedLatestVersion &&
     Date.now() - cachedLatestVersion.timestamp < CACHE_TTL_MS
   ) {
@@ -209,11 +211,15 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
   routes.get("/", async (c) => {
     const compatibility = getServerCompatibilityInfo(options);
     const current = compatibility.appVersion;
+    const fresh =
+      c.req.query("fresh") === "1" || c.req.query("fresh") === "true";
 
     // For dev versions like "v0.1.7-3-g050bfd2", extract base version "v0.1.7"
     // to compare against the update server.
     const baseVersion = current.split("-")[0] || current;
-    const latest = await getLatestVersion(baseVersion, options?.installId);
+    const latest = await getLatestVersion(baseVersion, options?.installId, {
+      forceRefresh: fresh,
+    });
     const updateAvailable = latest
       ? isNewerVersion(baseVersion, latest)
       : false;
