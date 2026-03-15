@@ -157,6 +157,8 @@ export interface VersionRouteOptions {
   isDeviceBridgeEnabled?: () => boolean;
   /** Unique installation ID for update analytics. */
   installId?: string;
+  /** Whether voice input is enabled (default: true). */
+  voiceInputEnabled?: boolean;
 }
 
 export interface ServerCompatibilityInfo {
@@ -193,6 +195,9 @@ function getCapabilitiesForDeviceBridgeState(
 
 export function getServerCapabilities(options?: VersionRouteOptions): string[] {
   const capabilities = [...BASE_CAPABILITIES];
+  if (options?.voiceInputEnabled !== false) {
+    capabilities.push("voiceInput");
+  }
   const deviceBridgeState = options?.getDeviceBridgeState?.() ?? "unavailable";
   const enabled = options?.isDeviceBridgeEnabled?.() ?? false;
   capabilities.push(
@@ -224,6 +229,7 @@ export function createVersionRoutes(options?: VersionRouteOptions): Hono {
     const enabled = options?.isDeviceBridgeEnabled?.() ?? false;
     const capabilities = [
       ...BASE_CAPABILITIES,
+      ...(options?.voiceInputEnabled !== false ? ["voiceInput"] : []),
       ...getCapabilitiesForDeviceBridgeState(deviceBridgeStatus.state, enabled),
     ];
 

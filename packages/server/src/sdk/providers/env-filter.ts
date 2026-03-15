@@ -32,6 +32,8 @@ const EXCLUDED_VARS = new Set([
   "AUTH_DISABLED",
   // Proxy debug (internal)
   "PROXY_DEBUG",
+  // Prevent nested session detection when server runs inside Claude Code
+  "CLAUDECODE",
 ]);
 
 /** Essential variables to always keep (even if they match excluded patterns) */

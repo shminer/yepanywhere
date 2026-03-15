@@ -99,6 +99,10 @@ export interface Config {
   logToFile: boolean;
   /** Whether to pretty-print console logs. Default: true */
   logPretty: boolean;
+  /** Enabled provider names. Empty = all providers enabled. */
+  enabledProviders: string[];
+  /** Whether voice input is enabled. Default: true */
+  voiceInputEnabled: boolean;
 
   /** Whether cookie-based auth is disabled by env var (--auth-disable or AUTH_DISABLED=true). Used for recovery. */
   authDisabled: boolean;
@@ -132,7 +136,10 @@ export function loadConfig(): Config {
   // Session directories can be overridden via env vars for test isolation
   const claudeSessionsDir =
     process.env.CLAUDE_SESSIONS_DIR ??
-    path.join(os.homedir(), ".claude", "projects");
+    path.join(
+      process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
+      "projects",
+    );
   const geminiSessionsDir =
     process.env.GEMINI_SESSIONS_DIR ??
     path.join(os.homedir(), ".gemini", "tmp");
@@ -226,6 +233,14 @@ export function loadConfig(): Config {
     ),
     logToFile: process.env.LOG_TO_FILE === "true",
     logPretty: parseBooleanOrDefault(process.env.LOG_PRETTY, true),
+    // Enabled providers (comma-separated). Empty = all providers.
+    enabledProviders: process.env.ENABLED_PROVIDERS
+      ? process.env.ENABLED_PROVIDERS.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [],
+    // Voice input (default: true, set VOICE_INPUT=false to disable)
+    voiceInputEnabled: process.env.VOICE_INPUT !== "false",
     // Auth disabled override (for recovery if user forgets password)
     authDisabled: process.env.AUTH_DISABLED === "true",
     authCookieSecret: process.env.AUTH_COOKIE_SECRET,

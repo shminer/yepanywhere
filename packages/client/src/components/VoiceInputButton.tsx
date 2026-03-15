@@ -10,6 +10,7 @@ import {
   SPEECH_STATUS_LABELS,
   useSpeechRecognition,
 } from "../hooks/useSpeechRecognition";
+import { useVersion } from "../hooks/useVersion";
 import { useViewportWidth } from "../hooks/useViewportWidth";
 import { hasCoarsePointer } from "../lib/deviceDetection";
 
@@ -54,6 +55,9 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
   ref: ForwardedRef<VoiceInputButtonRef>,
 ) {
   const { voiceInputEnabled } = useModelSettings();
+  const { version: versionInfo } = useVersion();
+  const serverVoiceEnabled =
+    versionInfo?.capabilities?.includes("voiceInput") ?? true;
   const viewportWidth = useViewportWidth();
 
   // Show status text on desktop with sufficient width
@@ -87,7 +91,7 @@ export const VoiceInputButton = forwardRef(function VoiceInputButton(
     onInterimResult: handleInterim,
   });
 
-  const isAvailable = isSupported && voiceInputEnabled;
+  const isAvailable = isSupported && voiceInputEnabled && serverVoiceEnabled;
 
   // Get display text for status
   const statusLabel = error || SPEECH_STATUS_LABELS[status];

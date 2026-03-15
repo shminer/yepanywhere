@@ -171,6 +171,10 @@ export interface AppOptions {
   sharingService?: SharingService;
   /** DeviceBridgeService for Android emulator streaming */
   deviceBridgeService?: DeviceBridgeService;
+  /** If non-empty, only these provider names are exposed via the API. */
+  enabledProviders?: string[];
+  /** Whether voice input is enabled. Default: true */
+  voiceInputEnabled?: boolean;
 }
 
 export interface AppResult {
@@ -412,6 +416,7 @@ export function createApp(options: AppOptions): AppResult {
         options.serverSettingsService?.getSetting("deviceBridgeEnabled") ??
         false,
       installId: options.installId,
+      voiceInputEnabled: options.voiceInputEnabled,
     }),
   );
 
@@ -584,7 +589,10 @@ export function createApp(options: AppOptions): AppResult {
   // Provider routes (multi-provider detection)
   app.route(
     "/api/providers",
-    createProvidersRoutes({ modelInfoService: options.modelInfoService }),
+    createProvidersRoutes({
+      modelInfoService: options.modelInfoService,
+      enabledProviders: options.enabledProviders,
+    }),
   );
 
   // Server settings routes

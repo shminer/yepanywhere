@@ -73,7 +73,9 @@ export const CLAUDE_DIR =
   process.env.CLAUDE_SESSIONS_DIR?.replace(
     new RegExp(`\\${sep}projects$`),
     "",
-  ) ?? join(homedir(), ".claude");
+  ) ??
+  process.env.CLAUDE_CONFIG_DIR ??
+  join(homedir(), ".claude");
 export const CLAUDE_PROJECTS_DIR =
   process.env.CLAUDE_SESSIONS_DIR ?? join(CLAUDE_DIR, "projects");
 

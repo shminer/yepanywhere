@@ -5,6 +5,8 @@ import type { ModelInfoService } from "../services/ModelInfoService.js";
 
 interface ProviderRouteDeps {
   modelInfoService?: ModelInfoService;
+  /** If non-empty, only these provider names are exposed. */
+  enabledProviders?: string[];
 }
 
 /**
@@ -18,7 +20,11 @@ export function createProvidersRoutes(deps: ProviderRouteDeps = {}): Hono {
 
   // GET /api/providers - Get all available providers with auth status and models
   routes.get("/", async (c) => {
-    const providers = getAllProviders();
+    let providers = getAllProviders();
+    if (deps.enabledProviders && deps.enabledProviders.length > 0) {
+      const enabled = new Set(deps.enabledProviders);
+      providers = providers.filter((p) => enabled.has(p.name));
+    }
     const providerInfos: ProviderInfo[] = [];
 
     for (const provider of providers) {

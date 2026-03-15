@@ -165,14 +165,18 @@ export function LocalAccessSettings() {
 
     setIsApplying(true);
     try {
-      // Apply network binding changes
-      const result = await updateBinding({
-        localhostPort: portNum,
-        network: {
+      // Apply network binding changes (skip overridden fields to avoid 400 errors)
+      const bindingUpdate: Parameters<typeof updateBinding>[0] = {};
+      if (!binding?.localhost.overriddenByCli) {
+        bindingUpdate.localhostPort = portNum;
+      }
+      if (!binding?.network.overriddenByCli) {
+        bindingUpdate.network = {
           enabled: networkEnabled,
           host: networkEnabled ? effectiveInterface : undefined,
-        },
-      });
+        };
+      }
+      const result = await updateBinding(bindingUpdate);
 
       // Apply auth changes
       if (enablingAuth) {

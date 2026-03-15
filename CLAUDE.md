@@ -68,8 +68,28 @@ This creates separate data directories:
 Environment variables:
 - `YEP_ANYWHERE_PROFILE` - Profile name suffix (creates `~/.yep-anywhere-{profile}/`)
 - `YEP_ANYWHERE_DATA_DIR` - Full path override for data directory
+- `CLAUDE_CONFIG_DIR` - Claude Code config directory (default: `~/.claude`). Use this to point at a Claude Code profile (e.g., `~/.claude-work`). Sessions are scanned from `{CLAUDE_CONFIG_DIR}/projects/`.
 
-Note: Both instances share `~/.claude/projects/` (SDK-managed sessions).
+Note: By default, all instances share `~/.claude/projects/` (SDK-managed sessions). Set `CLAUDE_CONFIG_DIR` to use a different Claude Code profile per instance.
+
+## Provider & Feature Configuration
+
+Restrict which agent providers and features are available:
+
+```bash
+# Only show Claude Code (hide Codex, Gemini, etc.)
+ENABLED_PROVIDERS=claude pnpm dev
+
+# Disable voice input (microphone button)
+VOICE_INPUT=false pnpm dev
+
+# Combined example: Claude-only, no voice, dev profile
+ENABLED_PROVIDERS=claude VOICE_INPUT=false PORT=4000 YEP_ANYWHERE_PROFILE=dev pnpm dev
+```
+
+Environment variables:
+- `ENABLED_PROVIDERS` - Comma-separated list of provider names to expose (default: all). Valid names: `claude`, `claude-ollama`, `codex`, `codex-oss`, `gemini`, `gemini-acp`, `opencode`
+- `VOICE_INPUT` - Set to `false` to disable the voice input button server-side (default: `true`)
 
 ## Android Emulator Testing
 

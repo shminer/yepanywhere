@@ -187,36 +187,57 @@ export class ClaudeProvider implements AgentProvider {
   private async probeModels(): Promise<ModelInfo[]> {
     const abortController = new AbortController();
 
-    // Create a generator that never yields (session waits for messages)
-    async function* emptyGenerator(): AsyncGenerator<never> {
-      // Never yield - just wait indefinitely
-      await new Promise(() => {});
+    // Generator that waits indefinitely — keeps the SDK process alive
+    // while we query supportedModels() from the initialization handshake.
+    // Resolves (rather than rejects) on abort to avoid unhandled rejections.
+    async function* waitForever(): AsyncGenerator<never> {
+      await new Promise<never>((resolve) => {
+        abortController.signal.addEventListener("abort", () =>
+          resolve(undefined as never),
+        );
+      });
     }
 
     try {
       const sdkQuery = query({
-        prompt: emptyGenerator(),
+        prompt: waitForever(),
         options: {
-          cwd: homedir(), // Use home dir as neutral working directory
+          cwd: homedir(),
           abortController,
           permissionMode: "default",
-          // Don't persist this probe session to disk
           persistSession: false,
           env: this.getEnv(),
         },
       });
 
-      // Get models from SDK initialization
-      const models = await sdkQuery.supportedModels();
+      // The SDK's internal readMessages loop must be running for
+      // the initialize control_response to be processed. Start
+      // consuming the async iterator in the background.
+      const drain = (async () => {
+        try {
+          for await (const _ of sdkQuery) {
+            // drain
+          }
+        } catch {
+          // Expected — abort causes an error
+        }
+      })();
 
-      // Map SDK ModelInfo to our ModelInfo format
+      // supportedModels() resolves once the initialize handshake completes.
+      // Race against a timeout in case the process hangs.
+      const models = await Promise.race([
+        sdkQuery.supportedModels(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Model probe timed out")), 15000),
+        ),
+      ]);
+
       return models.map((m) => ({
         id: m.value,
         name: m.displayName,
         description: m.description,
       }));
     } finally {
-      // Always abort the probe session
       abortController.abort();
     }
   }

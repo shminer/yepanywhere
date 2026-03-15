@@ -532,6 +532,8 @@ async function startServer() {
     sharingService,
     deviceBridgeService,
     modelInfoService,
+    enabledProviders: config.enabledProviders,
+    voiceInputEnabled: config.voiceInputEnabled,
   });
 
   const focusedSessionWatchManager = new FocusedSessionWatchManager({
