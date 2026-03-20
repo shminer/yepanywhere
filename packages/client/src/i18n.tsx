@@ -6,12 +6,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import deMessages from "./i18n/de.json";
 import enMessages from "./i18n/en.json";
-import esMessages from "./i18n/es.json";
-import frMessages from "./i18n/fr.json";
-import jaMessages from "./i18n/ja.json";
-import zhCNMessages from "./i18n/zh-CN.json";
 import { UI_KEYS } from "./lib/storageKeys";
 
 export const SUPPORTED_LOCALES = [
@@ -26,16 +21,18 @@ export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 const DEFAULT_LOCALE: Locale = "en";
 
-const messages = {
-  en: enMessages,
-  "zh-CN": zhCNMessages,
-  es: esMessages,
-  fr: frMessages,
-  de: deMessages,
-  ja: jaMessages,
-} as const;
+const defaultMessages = enMessages;
+type Messages = typeof defaultMessages;
+type MessageKey = keyof Messages;
 
-type MessageKey = keyof (typeof messages)[typeof DEFAULT_LOCALE];
+const localeLoaders: Record<Locale, () => Promise<Messages>> = {
+  en: async () => defaultMessages,
+  "zh-CN": async () => (await import("./i18n/zh-CN.json")).default,
+  es: async () => (await import("./i18n/es.json")).default,
+  fr: async () => (await import("./i18n/fr.json")).default,
+  de: async () => (await import("./i18n/de.json")).default,
+  ja: async () => (await import("./i18n/ja.json")).default,
+};
 
 interface I18nContextValue {
   locale: Locale;
@@ -62,20 +59,37 @@ function detectLocale(): Locale {
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(detectLocale);
+  const [messages, setMessages] = useState<Partial<Record<Locale, Messages>>>({
+    en: defaultMessages,
+  });
 
   useEffect(() => {
     localStorage.setItem(UI_KEYS.locale, locale);
     document.documentElement.lang = locale;
   }, [locale]);
 
+  useEffect(() => {
+    if (messages[locale]) return;
+
+    let cancelled = false;
+
+    void localeLoaders[locale]().then((loadedMessages) => {
+      if (cancelled) return;
+      setMessages((current) => ({ ...current, [locale]: loadedMessages }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, messages]);
+
   const value = useMemo<I18nContextValue>(
     () => ({
       locale,
       setLocale: setLocaleState,
       t: (key, vars) => {
-        let text = String(
-          messages[locale][key] ?? messages[DEFAULT_LOCALE][key],
-        );
+        const activeMessages = messages[locale] ?? defaultMessages;
+        let text = String(activeMessages[key] ?? defaultMessages[key]);
         if (!vars) return text;
         for (const [name, value] of Object.entries(vars)) {
           text = text.replaceAll(`{${name}}`, String(value));
@@ -83,7 +97,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         return text;
       },
     }),
-    [locale],
+    [locale, messages],
   );
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;

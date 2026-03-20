@@ -34,7 +34,9 @@ export function AppearanceSettings() {
           <select
             className="settings-select"
             value={locale}
-            onChange={(e) => setLocale(e.target.value as (typeof SUPPORTED_LOCALES)[number])}
+            onChange={(e) =>
+              setLocale(e.target.value as (typeof SUPPORTED_LOCALES)[number])
+            }
             aria-label={t("appearanceLanguageTitle")}
           >
             {SUPPORTED_LOCALES.map((value) => (
