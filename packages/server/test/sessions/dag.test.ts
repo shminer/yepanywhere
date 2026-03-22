@@ -91,6 +91,54 @@ describe("buildDag", () => {
     expect(result.tip?.uuid).toBe("a");
   });
 
+  it("excludes progress messages and bridges the gap", () => {
+    // Real-world structure from Agent/Explore tool:
+    // user → thinking → tool_use(Agent)
+    //   ├── tool_result → thinking → text (conversation)
+    //   └── progress → progress → ... → progress (subagent updates)
+    //                                        └── next_user (SDK parents to last progress)
+    //
+    // Without excluding progress, tool_result→thinking→text ends up on dead branch
+    const messages: RawSessionMessage[] = [
+      { type: "user", uuid: "u1", parentUuid: null },
+      { type: "assistant", uuid: "think1", parentUuid: "u1" },
+      { type: "assistant", uuid: "tool_use1", parentUuid: "think1" }, // Agent tool_use
+      { type: "user", uuid: "tool_result1", parentUuid: "tool_use1" }, // tool_result
+      { type: "assistant", uuid: "think2", parentUuid: "tool_result1" }, // thinking after result
+      { type: "assistant", uuid: "text1", parentUuid: "think2" }, // text summary (was missing!)
+      // Progress messages branch off the tool_use, forming a parallel chain
+      { type: "progress", uuid: "p1", parentUuid: "tool_use1" },
+      { type: "progress", uuid: "p2", parentUuid: "p1" },
+      { type: "progress", uuid: "p3", parentUuid: "p2" },
+      // Next user message is parented to last progress (SDK behavior)
+      { type: "user", uuid: "u2", parentUuid: "p3" },
+      { type: "assistant", uuid: "text2", parentUuid: "u2" },
+    ];
+
+    const result = buildDag(messages);
+
+    // Active branch should include ALL conversation messages, including text1
+    const uuids = result.activeBranch.map((n) => n.uuid);
+    expect(uuids).toContain("text1");
+    expect(uuids).toContain("u2");
+    expect(uuids).toContain("text2");
+    // Progress messages should NOT be in the active branch
+    expect(uuids).not.toContain("p1");
+    expect(uuids).not.toContain("p2");
+    expect(uuids).not.toContain("p3");
+    // Full expected chain
+    expect(uuids).toEqual([
+      "u1",
+      "think1",
+      "tool_use1",
+      "tool_result1",
+      "think2",
+      "text1",
+      "u2",
+      "text2",
+    ]);
+  });
+
   it("handles broken parentUuid chain gracefully", () => {
     // Message b references non-existent parent
     const messages: RawSessionMessage[] = [
