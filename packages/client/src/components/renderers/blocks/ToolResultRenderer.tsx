@@ -42,7 +42,13 @@ function ToolResultRendererComponent({
         {isError && <span className="badge badge-error">Error</span>}
       </div>
       <div className="tool-content">
-        {toolRegistry.renderToolResult(toolName, result, isError, context)}
+        {toolRegistry.renderToolResult(
+          toolName,
+          result,
+          isError,
+          context,
+          toolUse?.input,
+        )}
       </div>
     </div>
   );

@@ -12,20 +12,22 @@ function getFileName(path: string): string {
 }
 
 /**
- * ViewImage tool use - shows the image path
+ * Modal content that fetches the image only when mounted (i.e. when modal opens).
  */
-function ViewImageToolUse({ input }: { input: ViewImageInput }) {
-  return (
-    <div className="viewimage-tool-use">
-      <span className="viewimage-path">{input.path}</span>
-    </div>
-  );
-}
+function ViewImageModalContent({ path, alt }: { path: string; alt: string }) {
+  const apiPath = `/api/local-image?path=${encodeURIComponent(path)}`;
+  const { url, loading, error } = useFetchedImage(apiPath);
 
-/**
- * Image content displayed inside the modal
- */
-function ViewImageModalContent({ url, alt }: { url: string; alt: string }) {
+  if (loading) {
+    return <div className="viewimage-loading">Loading image...</div>;
+  }
+
+  if (error || !url) {
+    return (
+      <div className="viewimage-error">{error ?? "Failed to load image"}</div>
+    );
+  }
+
   return (
     <div className="read-image-result">
       <img
@@ -39,89 +41,54 @@ function ViewImageModalContent({ url, alt }: { url: string; alt: string }) {
 }
 
 /**
- * ViewImage tool result - clickable filename that opens modal with the image.
- * Fetches via XHR (with auth) and displays as blob URL.
+ * Clickable filename button that opens a modal to view the image.
+ * Does NOT fetch anything until the modal is opened.
  */
-function ViewImageToolResult({
-  input,
-  isError,
+function ViewImageButton({
+  path,
+  className,
+  onClick,
 }: {
-  input: ViewImageInput;
-  isError: boolean;
+  path: string;
+  className: string;
+  onClick: (e: React.MouseEvent) => void;
 }) {
-  const [showModal, setShowModal] = useState(false);
-  const apiPath = input?.path
-    ? `/api/local-image?path=${encodeURIComponent(input.path)}`
-    : null;
-  const { url, loading, error } = useFetchedImage(apiPath);
-  const fileName = getFileName(input.path);
-
-  if (isError || error) {
-    return (
-      <div className="viewimage-error">{error ?? "Failed to load image"}</div>
-    );
-  }
-
-  if (loading || !url) {
-    return <div className="viewimage-loading">Loading image...</div>;
-  }
-
   return (
-    <>
-      <div className="read-image-result">
-        <button
-          type="button"
-          className="file-link-button"
-          onClick={() => setShowModal(true)}
-        >
-          {fileName}
-          <span className="file-line-count">(image)</span>
-        </button>
-      </div>
-      {showModal && (
-        <Modal title={fileName} onClose={() => setShowModal(false)}>
-          <ViewImageModalContent url={url} alt={fileName} />
-        </Modal>
-      )}
-    </>
+    <button type="button" className={className} onClick={onClick}>
+      {getFileName(path)}
+      <span className="file-line-count-inline">(image)</span>
+    </button>
   );
 }
 
 /**
- * Interactive summary - clickable filename that opens modal
+ * Shared component: clickable filename + lazy-loading modal.
  */
-function ViewImageInteractiveSummary({
-  input,
+function ViewImageClickable({
+  path,
+  buttonClass,
+  stopPropagation,
 }: {
-  input: ViewImageInput;
+  path: string;
+  buttonClass: string;
+  stopPropagation?: boolean;
 }) {
   const [showModal, setShowModal] = useState(false);
-  const apiPath = input?.path
-    ? `/api/local-image?path=${encodeURIComponent(input.path)}`
-    : null;
-  const { url, error } = useFetchedImage(apiPath);
-  const fileName = getFileName(input.path);
-
-  if (error || !url) {
-    return <span>{fileName}</span>;
-  }
+  const fileName = getFileName(path);
 
   return (
     <>
-      <button
-        type="button"
-        className="file-link-inline"
+      <ViewImageButton
+        path={path}
+        className={buttonClass}
         onClick={(e) => {
-          e.stopPropagation();
+          if (stopPropagation) e.stopPropagation();
           setShowModal(true);
         }}
-      >
-        {fileName}
-        <span className="file-line-count-inline">(image)</span>
-      </button>
+      />
       {showModal && (
         <Modal title={fileName} onClose={() => setShowModal(false)}>
-          <ViewImageModalContent url={url} alt={fileName} />
+          <ViewImageModalContent path={path} alt={fileName} />
         </Modal>
       )}
     </>
@@ -133,12 +100,20 @@ export const viewImageRenderer: ToolRenderer<ViewImageInput, unknown> = {
   displayName: "View Image",
 
   renderToolUse(input, _context) {
-    return <ViewImageToolUse input={input as ViewImageInput} />;
+    const { path } = input as ViewImageInput;
+    return (
+      <div className="read-image-result">
+        <ViewImageClickable path={path} buttonClass="file-link-button" />
+      </div>
+    );
   },
 
-  renderToolResult(result, isError, _context, input) {
+  renderToolResult(_result, _isError, _context, input) {
+    const { path } = input as ViewImageInput;
     return (
-      <ViewImageToolResult input={input as ViewImageInput} isError={isError} />
+      <div className="read-image-result">
+        <ViewImageClickable path={path} buttonClass="file-link-button" />
+      </div>
     );
   },
 
@@ -152,6 +127,13 @@ export const viewImageRenderer: ToolRenderer<ViewImageInput, unknown> = {
   },
 
   renderInteractiveSummary(input, _result, _isError, _context) {
-    return <ViewImageInteractiveSummary input={input as ViewImageInput} />;
+    const { path } = input as ViewImageInput;
+    return (
+      <ViewImageClickable
+        path={path}
+        buttonClass="file-link-inline"
+        stopPropagation
+      />
+    );
   },
 };
