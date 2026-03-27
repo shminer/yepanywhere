@@ -22,6 +22,7 @@ export type {
   ModelInfo,
   SlashCommand,
   PermissionMode,
+  NewSessionDefaults,
   ModelOption,
   ThinkingMode,
   ThinkingOption,
@@ -36,6 +37,7 @@ export type {
 } from "./types.js";
 export {
   ALL_PROVIDERS,
+  ALL_PERMISSION_MODES,
   thinkingOptionToConfig,
   resolveModel,
   DEFAULT_MODEL,

@@ -6,6 +6,7 @@ import type {
   EnrichedRecentEntry,
   FileContentResponse,
   GitStatusInfo,
+  NewSessionDefaults,
   PendingInputType,
   ProviderInfo,
   ProviderName,
@@ -1014,12 +1015,6 @@ export interface RemoteExecutorTestResult {
   claudeAvailable?: boolean;
   /** Claude CLI version on remote (e.g. "1.0.12") */
   claudeVersion?: string;
-}
-
-export interface NewSessionDefaults {
-  provider?: ProviderName;
-  model?: string;
-  permissionMode?: PermissionMode;
 }
 
 /** Server-wide settings that persist across restarts */

@@ -7,15 +7,9 @@
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { PermissionMode, ProviderName } from "@yep-anywhere/shared";
+import type { NewSessionDefaults } from "@yep-anywhere/shared";
 
 const CURRENT_VERSION = 1;
-
-export interface NewSessionDefaults {
-  provider?: ProviderName;
-  model?: string;
-  permissionMode?: PermissionMode;
-}
 
 /** Server-wide settings */
 export interface ServerSettings {

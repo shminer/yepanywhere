@@ -105,6 +105,27 @@ export type PermissionMode =
   | "plan";
 
 /**
+ * All permission modes in canonical order.
+ * Used for validation, dropdowns, and iteration.
+ * Keep in sync with PermissionMode above.
+ */
+export const ALL_PERMISSION_MODES: readonly PermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+] as const;
+
+/**
+ * Saved defaults for the new session form.
+ */
+export interface NewSessionDefaults {
+  provider?: ProviderName;
+  model?: string;
+  permissionMode?: PermissionMode;
+}
+
+/**
  * Model option for Claude sessions.
  * - "default": Use the CLI's default model
  * - "sonnet": Claude Sonnet

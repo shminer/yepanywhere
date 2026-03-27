@@ -2,11 +2,16 @@
  * Server settings API routes
  */
 
-import type { PermissionMode, ProviderName } from "@yep-anywhere/shared";
+import {
+  ALL_PERMISSION_MODES,
+  ALL_PROVIDERS,
+  type NewSessionDefaults,
+  type PermissionMode,
+  type ProviderName,
+} from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import { testSSHConnection } from "../sdk/remote-spawn.js";
 import type {
-  NewSessionDefaults,
   ServerSettings,
   ServerSettingsService,
 } from "../services/ServerSettingsService.js";
@@ -31,23 +36,6 @@ export interface SettingsRoutesDeps {
   onOllamaUseFullSystemPromptChanged?: (enabled: boolean) => void;
 }
 
-const VALID_PROVIDERS: ProviderName[] = [
-  "claude",
-  "claude-ollama",
-  "codex",
-  "codex-oss",
-  "gemini",
-  "gemini-acp",
-  "opencode",
-];
-
-const VALID_PERMISSION_MODES: PermissionMode[] = [
-  "default",
-  "acceptEdits",
-  "plan",
-  "bypassPermissions",
-];
-
 function parseHostAliasList(rawHosts: unknown[]): {
   hosts: string[];
   invalidHost?: string;
@@ -69,6 +57,12 @@ function parseHostAliasList(rawHosts: unknown[]): {
   return { hosts };
 }
 
+/**
+ * Returns:
+ * - `null` when the payload is invalid
+ * - `undefined` when the setting should be cleared
+ * - an object when valid defaults should be saved
+ */
 function parseNewSessionDefaults(
   raw: unknown,
 ): NewSessionDefaults | undefined | null {
@@ -84,7 +78,7 @@ function parseNewSessionDefaults(
       input.provider !== undefined &&
       input.provider !== null &&
       input.provider !== "" &&
-      !VALID_PROVIDERS.includes(input.provider as ProviderName)
+      !ALL_PROVIDERS.includes(input.provider as ProviderName)
     ) {
       return null;
     }
@@ -112,7 +106,7 @@ function parseNewSessionDefaults(
       input.permissionMode !== undefined &&
       input.permissionMode !== null &&
       input.permissionMode !== "" &&
-      !VALID_PERMISSION_MODES.includes(input.permissionMode as PermissionMode)
+      !ALL_PERMISSION_MODES.includes(input.permissionMode as PermissionMode)
     ) {
       return null;
     }
