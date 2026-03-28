@@ -78,6 +78,7 @@ import type { SharingService } from "./services/SharingService.js";
 import { CodexSessionReader } from "./sessions/codex-reader.js";
 import { GeminiSessionReader } from "./sessions/gemini-reader.js";
 import { OpenCodeSessionReader } from "./sessions/opencode-reader.js";
+import { findSessionSummaryAcrossProviders } from "./sessions/provider-resolution.js";
 import { ClaudeSessionReader } from "./sessions/reader.js";
 import type { ISessionReader } from "./sessions/types.js";
 import { ExternalSessionTracker } from "./supervisor/ExternalSessionTracker.js";
@@ -350,8 +351,21 @@ export function createApp(options: AppOptions): AppResult {
   const getSessionSummary = async (sessionId: string, projectId: string) => {
     const project = await scanner.getProject(projectId);
     if (!project) return null;
-    const reader = readerFactory(project);
-    return reader.getSessionSummary(sessionId, project.id);
+    const resolved = await findSessionSummaryAcrossProviders(
+      project,
+      sessionId,
+      project.id,
+      {
+        readerFactory,
+        codexSessionsDir: CODEX_SESSIONS_DIR,
+        codexReaderFactory,
+        geminiSessionsDir: GEMINI_TMP_DIR,
+        geminiReaderFactory,
+        geminiHashToCwd: geminiScanner.getHashToCwd(),
+      },
+      options.sessionMetadataService?.getProvider(sessionId),
+    );
+    return resolved?.summary ?? null;
   };
   const supervisor = new Supervisor({
     sdk: options.sdk,
@@ -567,6 +581,12 @@ export function createApp(options: AppOptions): AppResult {
       notificationService: options.notificationService,
       sessionIndexService: options.sessionIndexService,
       sessionMetadataService: options.sessionMetadataService,
+      codexScanner,
+      codexSessionsDir: CODEX_SESSIONS_DIR,
+      codexReaderFactory,
+      geminiScanner,
+      geminiSessionsDir: GEMINI_TMP_DIR,
+      geminiReaderFactory,
     }),
   );
 
@@ -606,6 +626,12 @@ export function createApp(options: AppOptions): AppResult {
         scanner,
         readerFactory,
         sessionIndexService: options.sessionIndexService,
+        codexScanner,
+        codexSessionsDir: CODEX_SESSIONS_DIR,
+        codexReaderFactory,
+        geminiScanner,
+        geminiSessionsDir: GEMINI_TMP_DIR,
+        geminiReaderFactory,
       }),
     );
   }

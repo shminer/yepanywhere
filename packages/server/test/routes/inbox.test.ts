@@ -2,12 +2,14 @@ import type { UrlProjectId } from "@yep-anywhere/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionIndexService } from "../../src/indexes/index.js";
 import type { NotificationService } from "../../src/notifications/index.js";
+import type { CodexSessionScanner } from "../../src/projects/codex-scanner.js";
 import type { ProjectScanner } from "../../src/projects/scanner.js";
 import {
   type InboxDeps,
   type InboxResponse,
   createInboxRoutes,
 } from "../../src/routes/inbox.js";
+import type { CodexSessionReader } from "../../src/sessions/codex-reader.js";
 import type { ISessionReader } from "../../src/sessions/types.js";
 import type { Supervisor } from "../../src/supervisor/Supervisor.js";
 import type { Project, SessionSummary } from "../../src/supervisor/types.js";
@@ -64,6 +66,7 @@ describe("Inbox Routes", () => {
   let mockNotificationService: NotificationService;
   let mockSessionIndexService: SessionIndexService;
   let sessionsByDir: Map<string, SessionSummary[]>;
+  let codexSessionsByPath: Map<string, SessionSummary[]>;
   let processMap: Map<
     string,
     { getPendingInputRequest: () => unknown; state: { type: string } }
@@ -72,6 +75,7 @@ describe("Inbox Routes", () => {
 
   beforeEach(() => {
     sessionsByDir = new Map();
+    codexSessionsByPath = new Map();
     processMap = new Map();
     unreadMap = new Map();
 
@@ -110,7 +114,7 @@ describe("Inbox Routes", () => {
         async (
           sessionDir: string,
           _projectId: string,
-          reader: SessionReader,
+          reader: ISessionReader,
         ) => {
           return reader.listSessions(_projectId as UrlProjectId);
         },
@@ -668,6 +672,48 @@ describe("Inbox Routes", () => {
 
       // Archived session should be excluded from unread24h tier
       expect(result.unread24h).toHaveLength(0);
+    });
+
+    it("includes codex sessions for projects whose primary provider is claude", async () => {
+      const project = createProject("proj1", "project1", "/sessions/proj1");
+      project.path = "/home/user/project1";
+      const codexSession = createSession("codex-sess", "proj1", minutesAgo(5), {
+        provider: "codex",
+        title: "Codex session",
+      });
+
+      vi.mocked(mockScanner.listProjects).mockResolvedValue([project]);
+      codexSessionsByPath.set(project.path, [codexSession]);
+
+      const result = await makeRequest({
+        scanner: mockScanner,
+        readerFactory: mockReaderFactory,
+        sessionIndexService: mockSessionIndexService,
+        codexScanner: {
+          listProjects: vi.fn(async () => [
+            {
+              ...project,
+              sessionDir: "/tmp/codex-sessions",
+              provider: "codex",
+            },
+          ]),
+        } as unknown as CodexSessionScanner,
+        codexSessionsDir: "/tmp/codex-sessions",
+        codexReaderFactory: vi.fn(
+          (projectPath: string) =>
+            ({
+              listSessions: vi.fn(
+                async () => codexSessionsByPath.get(projectPath) ?? [],
+              ),
+              getAgentMappings: vi.fn(async () => []),
+              getAgentSession: vi.fn(async () => null),
+            }) as unknown as CodexSessionReader,
+        ),
+      });
+
+      expect(result.recentActivity).toHaveLength(1);
+      expect(result.recentActivity[0]?.sessionId).toBe("codex-sess");
+      expect(result.recentActivity[0]?.sessionTitle).toBe("Codex session");
     });
   });
 });

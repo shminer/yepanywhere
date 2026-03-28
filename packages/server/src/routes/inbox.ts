@@ -15,8 +15,12 @@ import type { SessionIndexService } from "../indexes/index.js";
 import { getLogger } from "../logging/logger.js";
 import type { SessionMetadataService } from "../metadata/SessionMetadataService.js";
 import type { NotificationService } from "../notifications/index.js";
+import type { CodexSessionScanner } from "../projects/codex-scanner.js";
+import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
 import type { ProjectScanner } from "../projects/scanner.js";
-import { ClaudeSessionReader } from "../sessions/reader.js";
+import type { CodexSessionReader } from "../sessions/codex-reader.js";
+import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
+import { listSessionsAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { Supervisor } from "../supervisor/Supervisor.js";
 import type {
@@ -25,6 +29,7 @@ import type {
   Project,
   SessionSummary,
 } from "../supervisor/types.js";
+import { buildProviderProjectCatalog } from "./provider-catalog.js";
 
 export interface InboxDeps {
   scanner: ProjectScanner;
@@ -33,6 +38,12 @@ export interface InboxDeps {
   notificationService?: NotificationService;
   sessionIndexService?: SessionIndexService;
   sessionMetadataService?: SessionMetadataService;
+  codexScanner?: CodexSessionScanner;
+  codexSessionsDir?: string;
+  codexReaderFactory?: (projectPath: string) => CodexSessionReader;
+  geminiScanner?: GeminiSessionScanner;
+  geminiSessionsDir?: string;
+  geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
 }
 
 export interface InboxItem {
@@ -88,38 +99,28 @@ export function createInboxRoutes(deps: InboxDeps): Hono {
     }> = [];
 
     const logger = getLogger();
+    const providerCatalog = await buildProviderProjectCatalog({
+      codexScanner: deps.codexScanner,
+      geminiScanner: deps.geminiScanner,
+    });
 
     // Fetch sessions from all projects in parallel
     const projectSessionResults = await Promise.all(
       projects.map(async (project) => {
         try {
-          const reader = deps.readerFactory(project);
-
-          let sessions: SessionSummary[];
-          if (deps.sessionIndexService) {
-            sessions = await deps.sessionIndexService.getSessionsWithCache(
-              project.sessionDir,
-              project.id,
-              reader,
-            );
-            // Include sessions from cross-machine merged directories (Claude-specific)
-            if (project.provider === "claude" && project.mergedSessionDirs) {
-              for (const dir of project.mergedSessionDirs) {
-                const mergedReader = new ClaudeSessionReader({
-                  sessionDir: dir,
-                });
-                const merged =
-                  await deps.sessionIndexService.getSessionsWithCache(
-                    dir,
-                    project.id,
-                    mergedReader,
-                  );
-                sessions = [...sessions, ...merged];
-              }
-            }
-          } else {
-            sessions = await reader.listSessions(project.id);
-          }
+          const sessions = await listSessionsAcrossProviders(
+            project,
+            {
+              readerFactory: deps.readerFactory,
+              sessionIndexService: deps.sessionIndexService,
+              codexSessionsDir: deps.codexSessionsDir,
+              codexReaderFactory: deps.codexReaderFactory,
+              geminiSessionsDir: deps.geminiSessionsDir,
+              geminiReaderFactory: deps.geminiReaderFactory,
+              geminiHashToCwd: providerCatalog.geminiHashToCwd,
+            },
+            providerCatalog,
+          );
           return { project, sessions };
         } catch (err) {
           logger.warn(

@@ -5,9 +5,14 @@ import type {
 } from "@yep-anywhere/shared";
 import { Hono } from "hono";
 import type { ISessionIndexService } from "../indexes/types.js";
+import type { CodexSessionScanner } from "../projects/codex-scanner.js";
+import type { GeminiSessionScanner } from "../projects/gemini-scanner.js";
 import { decodeProjectId, getProjectName } from "../projects/paths.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 import type { RecentsService } from "../recents/index.js";
+import type { CodexSessionReader } from "../sessions/codex-reader.js";
+import type { GeminiSessionReader } from "../sessions/gemini-reader.js";
+import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { Project } from "../supervisor/types.js";
 
@@ -16,6 +21,12 @@ export interface RecentsDeps {
   scanner: ProjectScanner;
   readerFactory: (project: Project) => ISessionReader;
   sessionIndexService?: ISessionIndexService;
+  codexScanner?: CodexSessionScanner;
+  codexSessionsDir?: string;
+  codexReaderFactory?: (projectPath: string) => CodexSessionReader;
+  geminiScanner?: GeminiSessionScanner;
+  geminiSessionsDir?: string;
+  geminiReaderFactory?: (projectPath: string) => GeminiSessionReader;
 }
 
 export function createRecentsRoutes(deps: RecentsDeps): Hono {
@@ -50,45 +61,31 @@ export function createRecentsRoutes(deps: RecentsDeps): Hono {
 
       const projectPath = decodeProjectId(projectId);
       const projectName = getProjectName(projectPath);
-      const reader = deps.readerFactory(project);
-
-      // Try to get session data from cache first
-      let title: string | null = null;
-      let provider: ProviderName = project.provider;
-
-      if (deps.sessionIndexService) {
-        const sessionTitle = await deps.sessionIndexService.getSessionTitle(
-          project.sessionDir,
-          projectId,
-          entry.sessionId,
-          reader,
-        );
-        if (sessionTitle === null) {
-          // Session doesn't exist or is empty - skip this entry
-          continue;
-        }
-        title = sessionTitle;
-      } else {
-        // Fallback: get full summary
-        const summary = await reader.getSessionSummary(
-          entry.sessionId,
-          projectId,
-        );
-        if (!summary) {
-          // Session doesn't exist - skip this entry
-          continue;
-        }
-        title = summary.title;
-        provider = summary.provider;
+      const resolved = await findSessionSummaryAcrossProviders(
+        project,
+        entry.sessionId,
+        projectId,
+        {
+          readerFactory: deps.readerFactory,
+          sessionIndexService: deps.sessionIndexService,
+          codexSessionsDir: deps.codexSessionsDir,
+          codexReaderFactory: deps.codexReaderFactory,
+          geminiSessionsDir: deps.geminiSessionsDir,
+          geminiReaderFactory: deps.geminiReaderFactory,
+          geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
+        },
+      );
+      if (!resolved) {
+        continue;
       }
 
       enriched.push({
         sessionId: entry.sessionId,
         projectId: entry.projectId,
         visitedAt: entry.visitedAt,
-        title,
+        title: resolved.summary.title,
         projectName,
-        provider,
+        provider: resolved.summary.provider as ProviderName,
       });
     }
 

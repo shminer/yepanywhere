@@ -5,6 +5,7 @@ import {
   type ProviderName,
   type ThinkingOption,
   type UploadedFile,
+  type UrlProjectId,
   getModelContextWindow,
   isUrlProjectId,
   thinkingOptionToConfig,
@@ -29,6 +30,7 @@ import {
   sliceAtCompactBoundaries,
 } from "../sessions/pagination.js";
 import { augmentPersistedSessionMessages } from "../sessions/persisted-augments.js";
+import { findSessionSummaryAcrossProviders } from "../sessions/provider-resolution.js";
 import type { ISessionReader } from "../sessions/types.js";
 import type { ExternalSessionTracker } from "../supervisor/ExternalSessionTracker.js";
 import type { Process } from "../supervisor/Process.js";
@@ -453,8 +455,24 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       : null;
 
     // Read minimal session info from disk (just for title/timestamps, no messages)
-    const reader = deps.readerFactory(project);
-    const sessionSummary = await reader.getSessionSummary(sessionId, projectId);
+    const metadataProvider = deps.sessionMetadataService?.getProvider(
+      sessionId,
+    ) as ProviderName | undefined;
+    const sessionSummaryResult = await findSessionSummaryAcrossProviders(
+      project,
+      sessionId,
+      projectId as UrlProjectId,
+      {
+        readerFactory: deps.readerFactory,
+        codexSessionsDir: deps.codexSessionsDir,
+        codexReaderFactory: deps.codexReaderFactory,
+        geminiSessionsDir: deps.geminiSessionsDir,
+        geminiReaderFactory: deps.geminiReaderFactory,
+        geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
+      },
+      process?.provider ?? metadataProvider,
+    );
+    const sessionSummary = sessionSummaryResult?.summary ?? null;
 
     if (!sessionSummary && !process) {
       return c.json({ error: "Session not found" }, 404);
@@ -1064,11 +1082,23 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
         | undefined;
     }
     if (!providerName) {
-      const reader = deps.readerFactory(project);
-      const sessionSummary = await reader.getSessionSummary(
+      const sessionSummaryResult = await findSessionSummaryAcrossProviders(
+        project,
         sessionId,
-        projectId,
+        projectId as UrlProjectId,
+        {
+          readerFactory: deps.readerFactory,
+          codexSessionsDir: deps.codexSessionsDir,
+          codexReaderFactory: deps.codexReaderFactory,
+          geminiSessionsDir: deps.geminiSessionsDir,
+          geminiReaderFactory: deps.geminiReaderFactory,
+          geminiHashToCwd: deps.geminiScanner?.getHashToCwd(),
+        },
+        deps.sessionMetadataService?.getProvider(sessionId) as
+          | ProviderName
+          | undefined,
       );
+      const sessionSummary = sessionSummaryResult?.summary ?? null;
       providerName = sessionSummary?.provider ?? project.provider;
     }
 
