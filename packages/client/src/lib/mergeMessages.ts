@@ -45,7 +45,10 @@ function getConversationSiblingKey(m: Message): string | null {
   return `${m.parentUuid}:${type}:${getMessageRole(m) ?? ""}`;
 }
 
-function hasAuthoritativeSibling(existing: Message[], incoming: Message): boolean {
+function hasAuthoritativeSibling(
+  existing: Message[],
+  incoming: Message,
+): boolean {
   const incomingKey = getConversationSiblingKey(incoming);
   if (!incomingKey) {
     return false;
@@ -223,7 +226,10 @@ export function mergeStreamMessage(
   existing: Message[],
   incoming: Message,
 ): MergeStreamResult {
-  if (incoming.isReplay === true && hasAuthoritativeSibling(existing, incoming)) {
+  if (
+    incoming.isReplay === true &&
+    hasAuthoritativeSibling(existing, incoming)
+  ) {
     return {
       messages: existing,
       index: -1,

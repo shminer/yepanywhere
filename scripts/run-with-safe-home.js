@@ -8,7 +8,9 @@ const stdinNull = rawArgs[0] === "--stdin-null";
 const [command, ...args] = stdinNull ? rawArgs.slice(1) : rawArgs;
 
 if (!command) {
-  console.error("Usage: node scripts/run-with-safe-home.js <command> [args...]");
+  console.error(
+    "Usage: node scripts/run-with-safe-home.js <command> [args...]",
+  );
   process.exit(1);
 }
 

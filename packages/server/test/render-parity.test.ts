@@ -5,11 +5,11 @@ import type {
   UrlProjectId,
 } from "@yep-anywhere/shared";
 import { describe, expect, it } from "vitest";
-import { preprocessMessages } from "../../client/src/lib/preprocessMessages.ts";
 import {
   mergeJSONLMessages,
   mergeStreamMessage,
 } from "../../client/src/lib/mergeMessages.ts";
+import { preprocessMessages } from "../../client/src/lib/preprocessMessages.ts";
 import type { Message as ClientMessage } from "../../client/src/types.ts";
 import { CodexProvider } from "../src/sdk/providers/codex.js";
 import { normalizeSession } from "../src/sessions/normalization.js";
@@ -706,7 +706,7 @@ const CLAUDE_QUEUE_HISTORY_FIXTURE: ClaudeSessionEntry[] = [
       content: [
         {
           type: "text",
-          text: "Done sleeping. I see you sent three messages while I was busy:\n\n1. \"i'm talking out of turn!\"\n2. \"saying a second thing out of turn\"\n3. \"saying a third thing out of turn\"\n\nAll received. How did the out-of-turn experience look on your end?",
+          text: 'Done sleeping. I see you sent three messages while I was busy:\n\n1. "i\'m talking out of turn!"\n2. "saying a second thing out of turn"\n3. "saying a third thing out of turn"\n\nAll received. How did the out-of-turn experience look on your end?',
         },
       ],
     },
@@ -907,10 +907,13 @@ describe("Render Parity Harness", () => {
         { source: "jsonl", messages: firstTurnJsonl },
         { source: "stream", messages: replaySecondTurnFirst },
         { source: "jsonl", messages: secondTurnJsonl },
-        { source: "stream", messages: buildReplayMessages(
+        {
+          source: "stream",
+          messages: buildReplayMessages(
             CLAUDE_SESSION_2E582BFB_FIXTURE,
             [1, 2],
-          ) },
+          ),
+        },
       ]),
     ];
 

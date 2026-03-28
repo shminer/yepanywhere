@@ -7,9 +7,7 @@ function pathEqualsOrContains(parentPath, childPath) {
   if (parentPath === childPath) return true;
   const relative = path.relative(parentPath, childPath);
   return (
-    relative !== "" &&
-    !relative.startsWith("..") &&
-    !path.isAbsolute(relative)
+    relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
   );
 }
 
@@ -68,7 +66,7 @@ export function assertSafeHome({
     `[safe-home] ${problem.reason}.`,
     `[safe-home] HOME=${problem.resolvedHome}`,
     `[safe-home] repo=${problem.repoRoot}`,
-    `[safe-home] This can redirect pnpm/corepack caches into the repo (for example ./Library/pnpm).`,
+    "[safe-home] This can redirect pnpm/corepack caches into the repo (for example ./Library/pnpm).",
     "[safe-home] Use narrower overrides like LOG_DIR, LOG_TO_FILE=false, or YEP_ANYWHERE_DATA_DIR instead of changing HOME.",
     `[safe-home] If this is truly intentional, rerun with ${ALLOW_ENV_VAR}=true.`,
   ].join("\n");
