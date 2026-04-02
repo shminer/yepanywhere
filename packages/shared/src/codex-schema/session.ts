@@ -130,13 +130,25 @@ export type CodexFunctionCallPayload = z.infer<
   typeof CodexFunctionCallPayloadSchema
 >;
 
+export const CodexFunctionCallOutputContentItemSchema = z.union([
+  CodexInputTextContentSchema,
+  CodexInputImageContentSchema,
+]);
+
+export type CodexFunctionCallOutputContentItem = z.infer<
+  typeof CodexFunctionCallOutputContentItemSchema
+>;
+
 /**
  * Function call output payload.
  */
 export const CodexFunctionCallOutputPayloadSchema = z.object({
   type: z.literal("function_call_output"),
   call_id: z.string(),
-  output: z.string(),
+  output: z.union([
+    z.string(),
+    z.array(CodexFunctionCallOutputContentItemSchema),
+  ]),
 });
 
 export type CodexFunctionCallOutputPayload = z.infer<
@@ -262,6 +274,7 @@ export const CodexRateLimitsSchema = z.object({
       window_minutes: z.number(),
       resets_at: z.number(),
     })
+    .nullable()
     .optional(),
   credits: z
     .object({
@@ -269,6 +282,7 @@ export const CodexRateLimitsSchema = z.object({
       unlimited: z.boolean(),
       balance: z.unknown().nullable(),
     })
+    .nullable()
     .optional(),
   plan_type: z.string().nullable().optional(),
 });
