@@ -11,7 +11,7 @@
     "staging": "node scripts/staging.js",
     "dev:auto": "pnpm --filter server dev & pnpm --filter client dev",
     "dev-tailscale": "tailscale serve --bg 3400 && pnpm dev",
-    "start": "NODE_ENV=production node packages/server/dist/index.js",
+    "start": "cross-env NODE_ENV=production node packages/server/dist/index.js",
     "build": "pnpm -r build",
     "build:bundle": "tsx scripts/build-bundle.ts",
     "build:stable": "pnpm --filter client build:stable",
