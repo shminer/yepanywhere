@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { HttpBindings } from "@hono/node-server";
 import { RESPONSE_ALREADY_SENT } from "@hono/node-server/utils/response";
 import { Hono } from "hono";
@@ -386,6 +387,22 @@ export function createApp(options: AppOptions): AppResult {
     onSessionSummary: getSessionSummary,
   });
 
+  const getDynamicLocalImagePaths = async (): Promise<string[]> => {
+    const projects = await scanner.listProjects();
+    const userHome = homedir();
+
+    // Ignore the synthetic home-directory fallback when no real projects exist.
+    if (
+      projects.length === 1 &&
+      projects[0]?.path === userHome &&
+      projects[0].sessionCount === 0
+    ) {
+      return [];
+    }
+
+    return projects.map((project) => project.path);
+  };
+
   // Create external session tracker if eventBus is available
   const externalTracker = options.eventBus
     ? new ExternalSessionTracker({
@@ -743,14 +760,13 @@ export function createApp(options: AppOptions): AppResult {
   }
 
   // Local image serving (opt-in, restricted to allowed paths)
-  if (options.allowedImagePaths && options.allowedImagePaths.length > 0) {
-    app.route(
-      "/api/local-image",
-      createLocalImageRoutes({
-        allowedPaths: options.allowedImagePaths,
-      }),
-    );
-  }
+  app.route(
+    "/api/local-image",
+    createLocalImageRoutes({
+      allowedPaths: options.allowedImagePaths ?? [],
+      getAllowedPaths: getDynamicLocalImagePaths,
+    }),
+  );
 
   // Push notification routes
   if (options.pushService) {
