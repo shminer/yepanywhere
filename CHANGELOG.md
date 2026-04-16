@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.28] - 2026-04-16
+
+### Changed
+- Upgrade claude-agent-sdk to 0.2.111 (adds Opus 4.7 support)
+
 ## [0.4.27] - 2026-04-16
 
 ### Fixed
