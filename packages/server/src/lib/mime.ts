@@ -344,6 +344,16 @@ export function getMimeType(filePath: string): string {
 }
 
 /**
+ * Get the HTTP Content-Type header value for a file response.
+ * Text-like formats include an explicit UTF-8 charset so browsers do not
+ * guess a legacy code page when rendering source files with non-ASCII content.
+ */
+export function getResponseContentType(filePath: string): string {
+  const mimeType = getMimeType(filePath);
+  return isTextFilePath(filePath) ? `${mimeType}; charset=utf-8` : mimeType;
+}
+
+/**
  * Check whether a path should be treated as a text file.
  */
 export function isTextFilePath(filePath: string): boolean {

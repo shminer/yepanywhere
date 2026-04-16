@@ -3,7 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import * as path from "node:path";
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
-import { getMimeType } from "../lib/mime.js";
+import { getResponseContentType } from "../lib/mime.js";
 
 interface LocalImageDeps {
   allowedPaths: string[];
@@ -132,7 +132,7 @@ export function createLocalImageRoutes(deps: LocalImageDeps) {
       return c.json({ error: "Path must be absolute" }, 400);
     }
 
-    const contentType = getMimeType(filePath);
+    const contentType = getResponseContentType(filePath);
 
     // Resolve symlinks to get the real path
     let resolvedPath: string;

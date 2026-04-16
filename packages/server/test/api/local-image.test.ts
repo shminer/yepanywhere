@@ -32,7 +32,7 @@ describe("Local image API", () => {
     await mkdir(join(projectPath, "src", "cloudauth"), { recursive: true });
     await writeFile(
       sourceFilePath,
-      '#include "cloudauth.h"\n\nint auth_main(void) { return 0; }\n',
+      '#include "cloudauth.h"\n\nconst char* auth_message = "中文授权";\n',
     );
 
     const sessionDir = join(projectsDir, encodeProjectDirName(projectPath));
@@ -59,9 +59,11 @@ describe("Local image API", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/x-c");
+    expect(response.headers.get("content-type")).toBe(
+      "text/x-c; charset=utf-8",
+    );
     expect(await response.text()).toBe(
-      '#include "cloudauth.h"\n\nint auth_main(void) { return 0; }\n',
+      '#include "cloudauth.h"\n\nconst char* auth_message = "中文授权";\n',
     );
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getMimeType, isTextFilePath } from "../src/lib/mime.js";
+import {
+  getMimeType,
+  getResponseContentType,
+  isTextFilePath,
+} from "../src/lib/mime.js";
 
 describe("mime helpers", () => {
   describe("getMimeType", () => {
@@ -48,6 +52,20 @@ describe("mime helpers", () => {
       ["archive.zip", false],
     ])("returns text=%s for %s", (filePath, expectedText) => {
       expect(isTextFilePath(filePath)).toBe(expectedText);
+    });
+  });
+
+  describe("getResponseContentType", () => {
+    it.each([
+      ["src/app.ts", "text/typescript; charset=utf-8"],
+      ["notes/readme.md", "text/markdown; charset=utf-8"],
+      ["data/config.json", "application/json; charset=utf-8"],
+      ["schema/layout.xml", "application/xml; charset=utf-8"],
+      ["image.svg", "image/svg+xml; charset=utf-8"],
+      ["image.png", "image/png"],
+      ["archive.zip", "application/zip"],
+    ])("returns %s for %s", (filePath, expectedContentType) => {
+      expect(getResponseContentType(filePath)).toBe(expectedContentType);
     });
   });
 });

@@ -11,7 +11,11 @@ import { Hono } from "hono";
 import { computeEditAugment } from "../augments/edit-augments.js";
 import { renderMarkdownToHtml } from "../augments/markdown-augments.js";
 import { highlightFile } from "../highlighting/index.js";
-import { getMimeType, isTextFilePath } from "../lib/mime.js";
+import {
+  getMimeType,
+  getResponseContentType,
+  isTextFilePath,
+} from "../lib/mime.js";
 import type { ProjectScanner } from "../projects/scanner.js";
 
 export interface FilesDeps {
@@ -225,7 +229,7 @@ export function createFilesRoutes(deps: FilesDeps): Hono {
 
     // Set headers
     const headers: Record<string, string> = {
-      "Content-Type": mimeType,
+      "Content-Type": getResponseContentType(filePath),
       "Content-Length": String(content.length),
     };
 

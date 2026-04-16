@@ -83,17 +83,19 @@ describe("Local image routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/x-dockerfile");
+    expect(response.headers.get("content-type")).toBe(
+      "text/x-dockerfile; charset=utf-8",
+    );
     expect(await response.text()).toBe("FROM node:20\n");
   });
 
-  it("serves non-media files and ignores markdown line anchors", async () => {
+  it("serves non-media files as utf-8 text and ignores markdown line anchors", async () => {
     const uploadsDir = path.join(tempDir, "uploads");
     const sessionDir = path.join(uploadsDir, "encoded-project-path", "session");
     await mkdir(sessionDir, { recursive: true });
 
     const filePath = path.join(sessionDir, "main.c");
-    await writeFile(filePath, "int main(void) { return 0; }\n");
+    await writeFile(filePath, 'const char* banner = "中文";\n');
 
     const routes = createLocalImageRoutes({
       allowedPaths: [uploadsDir],
@@ -104,8 +106,10 @@ describe("Local image routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/x-c");
-    expect(await response.text()).toBe("int main(void) { return 0; }\n");
+    expect(response.headers.get("content-type")).toBe(
+      "text/x-c; charset=utf-8",
+    );
+    expect(await response.text()).toBe('const char* banner = "中文";\n');
   });
 
   it("normalizes Windows drive-letter paths with a leading slash", () => {
