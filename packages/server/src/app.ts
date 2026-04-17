@@ -243,14 +243,16 @@ export function createApp(options: AppOptions): AppResult {
   }
 
   // Create dependencies
+  const codexScanner = new CodexSessionScanner();
+  const geminiScanner = new GeminiSessionScanner();
   const scanner = new ProjectScanner({
     projectsDir: options.projectsDir,
+    codexScanner,
+    geminiScanner,
     projectMetadataService: options.projectMetadataService,
     eventBus: options.eventBus,
     cacheTtlMs: options.projectScanCacheTtlMs,
   });
-  const codexScanner = new CodexSessionScanner();
-  const geminiScanner = new GeminiSessionScanner();
   const readerCache = new Map<string, ISessionReader>();
   const maxReaderCacheSize = 500;
 
