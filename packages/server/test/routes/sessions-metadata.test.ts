@@ -173,4 +173,61 @@ describe("Sessions metadata route", () => {
       expect.objectContaining({ providerName: "codex" }),
     );
   });
+
+  it("preserves persisted provider and model when queueing a restartable message", async () => {
+    const project = createProject();
+    const queueMessageToSession = vi.fn(async () => ({
+      success: true as const,
+      restarted: true,
+      process: { id: "proc-2" },
+    }));
+
+    const routes = createSessionsRoutes({
+      supervisor: {
+        getProcessForSession: vi.fn(() => ({
+          projectPath: project.path,
+          isTerminated: false,
+          provider: "claude",
+          model: "gpt-5.4",
+          resolvedModel: "gpt-5.4",
+          executor: undefined,
+        })),
+        queueMessageToSession,
+      } as unknown as SessionsDeps["supervisor"],
+      scanner: {
+        getOrCreateProject: vi.fn(async () => project),
+      } as unknown as SessionsDeps["scanner"],
+      readerFactory: vi.fn(
+        () =>
+          ({
+            getSessionSummary: vi.fn(async () => null),
+          }) as unknown as ISessionReader,
+      ),
+      sessionMetadataService: {
+        getProvider: vi.fn(() => "codex"),
+        getExecutor: vi.fn(() => undefined),
+      } as unknown as NonNullable<SessionsDeps["sessionMetadataService"]>,
+    });
+
+    const response = await routes.request("/sessions/sess-1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: "continue",
+        thinking: "max",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(queueMessageToSession).toHaveBeenCalledWith(
+      "sess-1",
+      project.path,
+      expect.objectContaining({ text: "continue" }),
+      undefined,
+      expect.objectContaining({
+        model: "gpt-5.4",
+        providerName: "codex",
+      }),
+    );
+  });
 });

@@ -84,6 +84,26 @@ describe("WorkerQueue", () => {
       const result = await promise;
       expect(result).toEqual({ status: "started", processId: "proc-123" });
     });
+
+    it("should preserve model settings on queued requests", () => {
+      queue.enqueue({
+        type: "resume-session",
+        projectPath: "/test/project",
+        projectId: TEST_PROJECT_ID,
+        sessionId: "sess-123",
+        message: { text: "Continue" },
+        modelSettings: {
+          model: "gpt-5.4",
+          providerName: "codex",
+        },
+      });
+
+      const request = queue.dequeue();
+      expect(request?.modelSettings).toEqual({
+        model: "gpt-5.4",
+        providerName: "codex",
+      });
+    });
   });
 
   describe("dequeue", () => {

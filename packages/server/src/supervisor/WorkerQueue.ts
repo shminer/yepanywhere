@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { UrlProjectId } from "@yep-anywhere/shared";
 import type { PermissionMode, UserMessage } from "../sdk/types.js";
 import type { EventBus } from "../watcher/EventBus.js";
+import type { ModelSettings } from "./Supervisor.js";
 
 /** Type of queued request */
 export type QueuedRequestType = "new-session" | "resume-session";
@@ -20,6 +21,7 @@ export interface QueuedRequest {
   sessionId?: string; // For resume-session requests
   message: UserMessage;
   permissionMode?: PermissionMode;
+  modelSettings?: ModelSettings;
   queuedAt: Date;
   /** Resolver to call when request is processed or cancelled */
   resolve: (result: QueuedRequestResult) => void;
@@ -90,6 +92,7 @@ export class WorkerQueue {
     sessionId?: string;
     message: UserMessage;
     permissionMode?: PermissionMode;
+    modelSettings?: ModelSettings;
   }): EnqueueResult {
     // Check queue size limit
     if (this.maxQueueSize > 0 && this.queue.length >= this.maxQueueSize) {
@@ -112,6 +115,7 @@ export class WorkerQueue {
       sessionId: params.sessionId,
       message: params.message,
       permissionMode: params.permissionMode,
+      modelSettings: params.modelSettings,
       queuedAt: new Date(),
       resolve: resolvePromise,
     };

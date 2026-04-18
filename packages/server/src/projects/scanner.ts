@@ -25,6 +25,8 @@ export interface ScannerOptions {
   projectsDir?: string; // override for testing
   codexSessionsDir?: string; // override for testing
   geminiSessionsDir?: string; // override for testing
+  codexScanner?: CodexSessionScanner | null; // shared provider scanner
+  geminiScanner?: GeminiSessionScanner | null; // shared provider scanner
   enableCodex?: boolean; // whether to include Codex projects (default: true)
   enableGemini?: boolean; // whether to include Gemini projects (default: true)
   projectMetadataService?: ProjectMetadataService; // for persisting added projects
@@ -59,14 +61,16 @@ export class ProjectScanner {
     this.enableCodex = options.enableCodex ?? true;
     this.enableGemini = options.enableGemini ?? true;
     this.codexScanner = this.enableCodex
-      ? new CodexSessionScanner({
+      ? (options.codexScanner ??
+        new CodexSessionScanner({
           sessionsDir: options.codexSessionsDir ?? CODEX_SESSIONS_DIR,
-        })
+        }))
       : null;
     this.geminiScanner = this.enableGemini
-      ? new GeminiSessionScanner({
+      ? (options.geminiScanner ??
+        new GeminiSessionScanner({
           sessionsDir: options.geminiSessionsDir ?? GEMINI_TMP_DIR,
-        })
+        }))
       : null;
     this.projectMetadataService = options.projectMetadataService ?? null;
     this.cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 5000);
@@ -181,6 +185,8 @@ export class ProjectScanner {
       mergedSessionDirs: project.mergedSessionDirs
         ? [...project.mergedSessionDirs]
         : undefined,
+      hasCodexSessions: project.hasCodexSessions,
+      hasGeminiSessions: project.hasGeminiSessions,
     };
   }
 
@@ -191,6 +197,11 @@ export class ProjectScanner {
 
     // Any session file delta can affect project existence/count/lastActivity.
     this.invalidateCache();
+    if (event.provider === "codex") {
+      this.codexScanner?.invalidateCache();
+    } else if (event.provider === "gemini") {
+      this.geminiScanner?.invalidateCache();
+    }
   }
 
   private async scanProjects(): Promise<Project[]> {
@@ -268,6 +279,8 @@ export class ProjectScanner {
           name: basename(projectPath),
           sessionCount,
           sessionDir,
+          hasCodexSessions: false,
+          hasGeminiSessions: false,
           activeOwnedCount: 0, // populated by route
           activeExternalCount: 0, // populated by route
           lastActivity,
@@ -325,14 +338,21 @@ export class ProjectScanner {
       const codexProjects = await this.codexScanner.listProjects();
       for (const codexProject of codexProjects) {
         const projectPath = canonicalizeProjectPath(codexProject.path);
-        // Skip if we've already seen this path from Claude
-        if (seenPaths.has(projectPath)) continue;
+        const existing = projects.find(
+          (project) => canonicalizeProjectPath(project.path) === projectPath,
+        );
+        if (existing) {
+          existing.hasCodexSessions = true;
+          continue;
+        }
         seenPaths.add(projectPath);
         projects.push({
           ...codexProject,
           id: encodeProjectId(projectPath),
           path: projectPath,
           name: basename(projectPath),
+          hasCodexSessions: true,
+          hasGeminiSessions: false,
         });
       }
     }
@@ -345,15 +365,21 @@ export class ProjectScanner {
       const geminiProjects = await this.geminiScanner.listProjects();
       for (const geminiProject of geminiProjects) {
         const projectPath = canonicalizeProjectPath(geminiProject.path);
-        // Skip if we've already seen this path from Claude/Codex
-        // (Gemini projects with unknown hashes will have paths like "gemini:xxxxxxxx")
-        if (seenPaths.has(projectPath)) continue;
+        const existing = projects.find(
+          (project) => canonicalizeProjectPath(project.path) === projectPath,
+        );
+        if (existing) {
+          existing.hasGeminiSessions = true;
+          continue;
+        }
         seenPaths.add(projectPath);
         projects.push({
           ...geminiProject,
           id: encodeProjectId(projectPath),
           path: projectPath,
           name: basename(projectPath),
+          hasCodexSessions: false,
+          hasGeminiSessions: true,
         });
       }
     }
@@ -383,6 +409,8 @@ export class ProjectScanner {
           name: basename(projectPath),
           sessionCount: 0,
           sessionDir: join(this.projectsDir, encodedPath),
+          hasCodexSessions: false,
+          hasGeminiSessions: false,
           activeOwnedCount: 0,
           activeExternalCount: 0,
           lastActivity: metadata.addedAt,

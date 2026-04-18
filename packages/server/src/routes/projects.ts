@@ -337,6 +337,7 @@ export function createProjectsRoutes(deps: ProjectsDeps): Hono {
     }
 
     const providerCatalog = await buildProviderProjectCatalog({
+      projects: [project],
       codexScanner: deps.codexScanner,
       geminiScanner: deps.geminiScanner,
     });

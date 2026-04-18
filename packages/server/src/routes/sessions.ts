@@ -1194,6 +1194,27 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       ? thinkingOptionToConfig(body.thinking)
       : { thinking: undefined, effort: undefined };
 
+    const metadataProvider = deps.sessionMetadataService?.getProvider(
+      sessionId,
+    ) as ProviderName | undefined;
+    const metadataExecutor = parseOptionalExecutor(
+      deps.sessionMetadataService?.getExecutor(sessionId),
+    );
+    if (metadataExecutor.error) {
+      return c.json({ error: metadataExecutor.error }, 400);
+    }
+    const { executor, error: executorError } = parseOptionalExecutor(
+      body.executor,
+    );
+    if (executorError) {
+      return c.json({ error: executorError }, 400);
+    }
+
+    const model =
+      body.model && body.model !== "default"
+        ? body.model
+        : (process.resolvedModel ?? process.model);
+
     // Use queueMessageToSession which handles thinking mode changes
     // If thinking mode changed, it will restart the process automatically
     const queueGlobalInstructions =
@@ -1203,7 +1224,19 @@ export function createSessionsRoutes(deps: SessionsDeps): Hono {
       process.projectPath,
       userMessage,
       body.mode,
-      { thinking, effort, globalInstructions: queueGlobalInstructions },
+      {
+        model,
+        thinking,
+        effort,
+        providerName: metadataProvider ?? body.provider ?? process.provider,
+        executor:
+          executor ??
+          metadataExecutor.executor ??
+          process.executor ??
+          undefined,
+        globalInstructions: queueGlobalInstructions,
+        permissions: body.permissions,
+      },
     );
 
     if (!result.success) {

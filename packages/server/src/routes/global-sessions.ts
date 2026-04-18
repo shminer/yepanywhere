@@ -180,6 +180,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
     const projects = await deps.scanner.listProjects();
     const stats: GlobalSessionStats = createEmptyStats();
     const providerCatalog = await buildProviderProjectCatalog({
+      projects,
       codexScanner: deps.codexScanner,
       geminiScanner: deps.geminiScanner,
     });
@@ -288,6 +289,7 @@ export function createGlobalSessionsRoutes(deps: GlobalSessionsDeps): Hono {
     // Collect all sessions with enriched data
     const allSessions: GlobalSessionItem[] = [];
     const providerCatalog = await buildProviderProjectCatalog({
+      projects: allProjects,
       codexScanner: deps.codexScanner,
       geminiScanner: deps.geminiScanner,
     });

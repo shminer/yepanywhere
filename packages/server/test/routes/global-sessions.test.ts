@@ -484,6 +484,66 @@ describe("Global Sessions Routes", () => {
   });
 
   describe("provider catalog", () => {
+    it("reuses provider presence from listed projects before consulting scanners", async () => {
+      const project = {
+        ...createProject("proj1", "project-one", "/sessions/proj1"),
+        hasCodexSessions: true,
+      } as Project;
+      const codexSession = createSession(
+        "codex-sess-1",
+        "proj1",
+        minutesAgo(1),
+        {
+          provider: "codex",
+        },
+      );
+
+      vi.mocked(mockScanner.listProjects).mockResolvedValue([project]);
+      sessionsByDir.set("/sessions/proj1", []);
+
+      const codexScanner = {
+        listProjects: vi.fn(async () => {
+          throw new Error("codex scanner should not be consulted");
+        }),
+      };
+      const codexReader = {
+        listSessions: vi.fn(async () => [codexSession]),
+      } as unknown as ISessionReader;
+      const codexReaderFactory = vi.fn(() => codexReader);
+      const sessionIndexService = {
+        getSessionsWithCache: vi.fn(
+          async (
+            sessionDir: string,
+            _projectId: string,
+            reader: ISessionReader,
+          ) => {
+            if (sessionDir === "/codex/sessions") {
+              expect(reader).toBe(codexReader);
+              return [codexSession];
+            }
+            return reader.listSessions(_projectId as UrlProjectId);
+          },
+        ),
+      } as unknown as SessionIndexService;
+
+      const routes = createGlobalSessionsRoutes({
+        ...getDeps({ sessionIndexService }),
+        codexScanner:
+          codexScanner as unknown as GlobalSessionsDeps["codexScanner"],
+        codexSessionsDir: "/codex/sessions",
+        codexReaderFactory:
+          codexReaderFactory as unknown as GlobalSessionsDeps["codexReaderFactory"],
+      });
+
+      const response = await routes.request("/?project=proj1");
+      expect(response.status).toBe(200);
+      const result = (await response.json()) as GlobalSessionsResponse;
+
+      expect(codexScanner.listProjects).not.toHaveBeenCalled();
+      expect(codexReaderFactory).toHaveBeenCalledWith(project.path);
+      expect(result.sessions.some((s) => s.id === "codex-sess-1")).toBe(true);
+    });
+
     it("builds codex project catalog once and avoids per-project scanner checks", async () => {
       const project1 = createProject("proj1", "project-one", "/sessions/proj1");
       const project2 = createProject("proj2", "project-two", "/sessions/proj2");

@@ -199,6 +199,7 @@ export class Supervisor {
           projectId,
           message,
           permissionMode,
+          modelSettings,
         });
         if (isQueueFullError(result)) {
           return result;
@@ -281,6 +282,7 @@ export class Supervisor {
           projectId,
           message: { text: "" }, // Placeholder, will be replaced when first message sent
           permissionMode,
+          modelSettings,
         });
         if (isQueueFullError(result)) {
           return result;
@@ -879,6 +881,7 @@ export class Supervisor {
           sessionId,
           message,
           permissionMode,
+          modelSettings,
         });
         if (isQueueFullError(result)) {
           return result;
@@ -1302,6 +1305,10 @@ export class Supervisor {
   }
 
   private unregisterProcess(process: Process): void {
+    if (!this.processes.has(process.id)) {
+      return;
+    }
+
     const log = getLogger();
     const durationMs = Date.now() - process.startedAt.getTime();
     log.info(
@@ -1685,6 +1692,7 @@ export class Supervisor {
             request.message,
             undefined,
             request.permissionMode,
+            request.modelSettings,
           );
           process = result;
         } else {
@@ -1694,6 +1702,7 @@ export class Supervisor {
             request.message,
             request.sessionId,
             request.permissionMode,
+            request.modelSettings,
           );
           process = result;
         }
@@ -1728,15 +1737,24 @@ export class Supervisor {
     message: UserMessage,
     resumeSessionId?: string,
     permissionMode?: PermissionMode,
+    modelSettings?: ModelSettings,
   ): Promise<Process> {
+    const provider = modelSettings?.providerName
+      ? getProvider(modelSettings.providerName)
+      : modelSettings?.executor
+        ? getProvider("claude")
+        : this.provider;
+
     // Use provider if available (preferred)
-    if (this.provider) {
+    if (provider) {
       return this.startProviderSession(
         projectPath,
         projectId,
         message,
         resumeSessionId,
         permissionMode,
+        modelSettings,
+        provider,
       );
     }
 
@@ -1748,6 +1766,7 @@ export class Supervisor {
         message,
         resumeSessionId,
         permissionMode,
+        modelSettings,
       );
     }
 

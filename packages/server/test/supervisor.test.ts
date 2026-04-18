@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageQueue } from "../src/sdk/messageQueue.js";
 import { MockClaudeSDK, createMockScenario } from "../src/sdk/mock.js";
+import type { AgentProvider } from "../src/sdk/providers/types.js";
 import type { RealClaudeSDKInterface } from "../src/sdk/types.js";
 import { Supervisor } from "../src/supervisor/Supervisor.js";
 import type { SessionSummary } from "../src/supervisor/types.js";
@@ -182,6 +183,141 @@ describe("Supervisor", () => {
       await supervisor.abortProcess(process.id);
 
       expect(supervisor.getProcessForSession("sess-123")).toBeUndefined();
+    });
+
+    it("records a terminated process only once when abort emits completion", async () => {
+      let aborted = false;
+
+      const realSdk: RealClaudeSDKInterface = {
+        startSession: async () => {
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id: "abort-once-session",
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue: new MessageQueue(),
+            abort: () => {
+              aborted = true;
+            },
+          };
+        },
+      };
+
+      const supervisorWithRealSdk = new Supervisor({
+        realSdk,
+        idleTimeoutMs: 100,
+      });
+
+      const process = await supervisorWithRealSdk.startSession("/tmp/test", {
+        text: "hi",
+      });
+
+      await expect(
+        supervisorWithRealSdk.abortProcess(process.id),
+      ).resolves.toBe(true);
+
+      expect(
+        supervisorWithRealSdk.getRecentlyTerminatedProcesses(),
+      ).toHaveLength(1);
+    });
+  });
+
+  describe("queue propagation", () => {
+    it("preserves model settings when a queued session starts later", async () => {
+      let aborted = false;
+      const startSession = vi.fn(
+        async (options: {
+          model?: string;
+          thinking?: { type: "adaptive" | "enabled" | "disabled" };
+          effort?: "low" | "medium" | "high" | "max";
+          resumeSessionId?: string;
+          initialMessage?: { text: string };
+        }) => {
+          async function* iterator() {
+            yield {
+              type: "system",
+              subtype: "init",
+              session_id:
+                options.resumeSessionId ??
+                `queued-session-${options.initialMessage?.text ?? "none"}`,
+            };
+            while (!aborted) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+
+          return {
+            iterator: iterator(),
+            queue: new MessageQueue(),
+            abort: () => {
+              aborted = true;
+            },
+          };
+        },
+      );
+
+      const provider: AgentProvider = {
+        name: "codex",
+        displayName: "Codex",
+        supportsPermissionMode: true,
+        supportsThinkingToggle: true,
+        supportsSlashCommands: false,
+        isInstalled: async () => true,
+        isAuthenticated: async () => true,
+        getAuthStatus: async () => ({
+          installed: true,
+          authenticated: true,
+          enabled: true,
+        }),
+        startSession,
+        getAvailableModels: async () => [],
+      };
+
+      const supervisorWithQueue = new Supervisor({
+        provider,
+        idleTimeoutMs: 100,
+        maxWorkers: 1,
+        idlePreemptThresholdMs: 60_000,
+      });
+
+      const first = await supervisorWithQueue.startSession("/tmp/test", {
+        text: "first",
+      });
+      expect("id" in first).toBe(true);
+
+      const queued = await supervisorWithQueue.startSession(
+        "/tmp/test",
+        { text: "second" },
+        undefined,
+        {
+          model: "gpt-5.4",
+          thinking: { type: "adaptive" },
+          effort: "high",
+        },
+      );
+      expect("queued" in queued && queued.queued).toBe(true);
+
+      aborted = true;
+      await supervisorWithQueue.abortProcess((first as { id: string }).id);
+
+      await vi.waitFor(() => {
+        expect(startSession).toHaveBeenCalledTimes(2);
+      });
+
+      expect(startSession.mock.calls[1]?.[0]).toMatchObject({
+        model: "gpt-5.4",
+        thinking: { type: "adaptive" },
+        effort: "high",
+        initialMessage: { text: "second" },
+      });
     });
   });
 
