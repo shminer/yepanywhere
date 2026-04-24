@@ -128,6 +128,7 @@ const DECLARE_CODEX_ORIGINATOR = true;
 const DECLARED_CODEX_ORIGINATOR = "Codex Desktop";
 
 const PREFERRED_MODEL_ORDER = [
+  "gpt-5.5",
   "gpt-5.3-codex",
   "gpt-5.2-codex",
   "gpt-5.1-codex-max",
@@ -135,7 +136,12 @@ const PREFERRED_MODEL_ORDER = [
   "gpt-5.1-codex-mini",
 ] as const;
 
+const ADDITIONAL_CODEX_MODELS: ModelInfo[] = [
+  { id: "gpt-5.5", name: "GPT-5.5" },
+];
+
 const FALLBACK_CODEX_MODELS: ModelInfo[] = [
+  { id: "gpt-5.5", name: "GPT-5.5" },
   { id: "gpt-5.3-codex", name: "GPT-5.3-Codex" },
   { id: "gpt-5.2-codex", name: "GPT-5.2-Codex" },
   { id: "gpt-5.1-codex-max", name: "GPT-5.1-Codex-Max" },
@@ -720,6 +726,8 @@ export class CodexProvider implements AgentProvider {
 
     if (models.length === 0) {
       models = FALLBACK_CODEX_MODELS;
+    } else {
+      models = this.mergeAdditionalModels(models);
     }
 
     this.modelCache = {
@@ -908,6 +916,28 @@ export class CodexProvider implements AgentProvider {
           id: upgradeId,
           name: this.formatModelName(upgradeId),
         });
+      }
+    }
+
+    return [...deduped.values()]
+      .map((model, index) => ({
+        model,
+        index,
+        rank: orderLookup.get(model.id) ?? PREFERRED_MODEL_ORDER.length + index,
+      }))
+      .sort((a, b) => a.rank - b.rank)
+      .map((entry) => entry.model);
+  }
+
+  private mergeAdditionalModels(models: ModelInfo[]): ModelInfo[] {
+    const orderLookup = new Map<string, number>(
+      PREFERRED_MODEL_ORDER.map((id, idx) => [id, idx]),
+    );
+    const deduped = new Map(models.map((model) => [model.id, model]));
+
+    for (const model of ADDITIONAL_CODEX_MODELS) {
+      if (!deduped.has(model.id)) {
+        deduped.set(model.id, model);
       }
     }
 
